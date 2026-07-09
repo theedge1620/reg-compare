@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RegDiff — Federal Register vs eCFR</title>
+<style>
+  :root {
+    --ink: #1a1a2e;
+    --ink-muted: #4a4a6a;
+    --ink-faint: #8888aa;
+    --paper: #f7f7fb;
+    --white: #ffffff;
+    --accent: #2d6a9f;
+    --accent-light: #e8f1f9;
+    --add: #1a7a3a;
+    --add-bg: #eafaf0;
+    --del: #a01a1a;
+    --del-bg: #faeaea;
+    --warn: #7a5a00;
+    --warn-bg: #fdf6e3;
+    --omit-bg: #f0f0f8;
+    --omit-fg: #666688;
+    --border: #dddde8;
+    --radius: 6px;
+    --mono: 'Courier New', Courier, monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body { font-family: 'Georgia', serif; background: var(--paper); color: var(--ink); min-height: 100vh; display: flex; flex-direction: column; }
+
+  header { background: var(--ink); color: var(--white); padding: 0 2rem; height: 56px; display: flex; align-items: center; gap: 1rem; flex-shrink: 0; }
+  .logo { font-family: 'Georgia', serif; font-size: 1.25rem; font-weight: bold; letter-spacing: -0.02em; }
+  .logo span { color: #7eb8e8; }
+  .tagline { font-size: 0.78rem; color: var(--ink-faint); font-family: sans-serif; border-left: 1px solid #333; padding-left: 1rem; margin-left: 0.5rem; }
+
+  main { flex: 1; display: flex; flex-direction: column; max-width: 1400px; width: 100%; margin: 0 auto; padding: 2rem; gap: 1.5rem; }
+
+  .upload-area { border: 2px dashed var(--border); border-radius: var(--radius); background: var(--white); padding: 2.5rem 2rem; text-align: center; transition: border-color 0.2s, background 0.2s; cursor: pointer; position: relative; }
+  .upload-area.drag-over { border-color: var(--accent); background: var(--accent-light); }
+  .upload-area input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .upload-icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+  .upload-area h2 { font-size: 1.1rem; color: var(--ink); margin-bottom: 0.4rem; }
+  .upload-area p { font-size: 0.85rem; color: var(--ink-muted); font-family: sans-serif; }
+
+  .status-bar { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.9rem 1.2rem; font-family: sans-serif; font-size: 0.85rem; display: none; align-items: flex-start; gap: 0.75rem; }
+  .status-bar.visible { display: flex; }
+  .status-icon { font-size: 1.2rem; flex-shrink: 0; }
+  .status-text strong { color: var(--ink); display: block; margin-bottom: 0.2rem; }
+  .status-text { color: var(--ink-muted); }
+
+  .amendments-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
+  .amendments-header h2 { font-size: 1rem; font-family: sans-serif; font-weight: 600; }
+  .badge { background: var(--accent); color: white; border-radius: 999px; font-size: 0.72rem; font-family: sans-serif; padding: 0.1rem 0.55rem; font-weight: 600; }
+  .amendment-cards { display: flex; flex-direction: column; gap: 0.5rem; }
+
+  .amendment-card { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .amendment-card-header { display: flex; align-items: center; padding: 0.75rem 1rem; gap: 0.75rem; cursor: pointer; user-select: none; transition: background 0.15s; }
+  .amendment-card-header:hover { background: var(--paper); }
+  .amend-num { font-family: var(--mono); font-size: 0.72rem; background: var(--ink); color: white; border-radius: 3px; padding: 0.1rem 0.4rem; flex-shrink: 0; }
+  .amend-title { font-family: sans-serif; font-size: 0.88rem; color: var(--ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .amend-cfr { font-family: var(--mono); font-size: 0.78rem; color: var(--accent); flex-shrink: 0; }
+  .amend-toggle { font-size: 0.75rem; color: var(--ink-faint); flex-shrink: 0; transition: transform 0.2s; }
+  .amendment-card.open .amend-toggle { transform: rotate(180deg); }
+  .amendment-body { display: none; border-top: 1px solid var(--border); }
+  .amendment-card.open .amendment-body { display: block; }
+
+  .amend-meta { padding: 0.6rem 1.25rem; font-family: sans-serif; font-size: 0.8rem; color: var(--ink-muted); background: #f0f0f8; border-bottom: 1px solid var(--border); display: flex; gap: 1.5rem; align-items: baseline; flex-wrap: wrap; }
+  .amend-meta .instruction { font-style: italic; flex: 1; }
+  .amend-meta a { color: var(--accent); text-decoration: none; font-style: normal; }
+
+  /* ── diff layout ── */
+  .diff-pane-header { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); }
+  .diff-col-label { padding: 0.45rem 1.25rem; font-family: sans-serif; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  .diff-col-label.current { color: var(--del); background: var(--del-bg); border-right: 1px solid var(--border); }
+  .diff-col-label.proposed { color: var(--add); background: var(--add-bg); }
+
+  /* Each row = one paragraph chunk */
+  .diff-row { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); }
+  .diff-row:last-child { border-bottom: none; }
+
+  .diff-cell { padding: 0.6rem 1.25rem; font-family: var(--mono); font-size: 0.8rem; line-height: 1.7; white-space: pre-wrap; }
+  .diff-cell.current { background: var(--del-bg); border-right: 1px solid var(--border); }
+  .diff-cell.proposed { background: var(--add-bg); }
+
+  /* unchanged / omitted region */
+  .diff-row.omitted .diff-cell { background: var(--omit-bg); color: var(--omit-fg); font-style: italic; font-size: 0.75rem; padding: 0.35rem 1.25rem; }
+
+  .diff-del { background: #f5c6c6; text-decoration: line-through; color: var(--del); }
+  .diff-add { background: #b8e8c8; color: var(--add); }
+
+  /* paragraph label badge */
+  .para-label { display: inline-block; font-family: sans-serif; font-size: 0.65rem; font-weight: 700; background: #dde; color: #445; border-radius: 3px; padding: 0 0.3rem; margin-right: 0.3rem; vertical-align: top; margin-top: 0.15rem; }
+
+  .loading-ecfr { font-family: sans-serif; font-size: 0.82rem; color: var(--ink-muted); padding: 1rem 1.25rem; display: flex; align-items: center; gap: 0.5rem; }
+  .spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .ecfr-error { font-family: sans-serif; font-size: 0.82rem; color: var(--warn); background: var(--warn-bg); padding: 0.75rem 1.25rem; }
+  .proposed-only { padding: 1rem 1.25rem; font-family: var(--mono); font-size: 0.8rem; line-height: 1.7; white-space: pre-wrap; background: var(--add-bg); }
+
+  .empty-state { text-align: center; padding: 3rem 2rem; color: var(--ink-faint); font-family: sans-serif; font-size: 0.9rem; }
+  .empty-state .icon { font-size: 2.5rem; margin-bottom: 1rem; }
+
+  /* ── part filter bar ── */
+  .filter-bar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; padding: 0.75rem 1rem; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); font-family: sans-serif; }
+  .filter-label { font-size: 0.75rem; font-weight: 600; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-right: 0.25rem; white-space: nowrap; }
+  .filter-pill { font-size: 0.78rem; font-family: var(--mono); padding: 0.2rem 0.65rem; border-radius: 999px; border: 1.5px solid var(--border); background: var(--white); color: var(--ink-muted); cursor: pointer; transition: background 0.12s, color 0.12s, border-color 0.12s; white-space: nowrap; }
+  .filter-pill:hover { border-color: var(--accent); color: var(--accent); }
+  .filter-pill.active { background: var(--accent); border-color: var(--accent); color: var(--white); font-weight: 600; }
+  .filter-count { font-size: 0.7rem; color: var(--ink-faint); margin-left: auto; white-space: nowrap; }
+
+  /* hide cards that don't match the active filter */
+  .amendment-card.hidden { display: none; }
+
+  footer { text-align: center; font-family: sans-serif; font-size: 0.75rem; color: var(--ink-faint); padding: 1.5rem 2rem; border-top: 1px solid var(--border); }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer code { background: #eee; padding: 0.05rem 0.3rem; border-radius: 3px; }
+
+  @media (max-width: 700px) {
+    .diff-pane-header, .diff-row { grid-template-columns: 1fr; }
+    .diff-cell.current, .diff-col-label.current { border-right: none; border-bottom: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Reg<span>Diff</span></div>
+  <div class="tagline">Federal Register proposed rules vs. current eCFR text</div>
+</header>
+
+<main>
+  <div class="upload-area" id="uploadArea">
+    <input type="file" id="fileInput" accept=".html,.htm,.txt" />
+    <div class="upload-icon">📄</div>
+    <h2>Drop a Federal Register document here</h2>
+    <p>Accepts .html or .txt files from regulations.gov · Extracts proposed amendments automatically</p>
+  </div>
+
+  <div class="status-bar" id="statusBar">
+    <div class="status-icon" id="statusIcon">⏳</div>
+    <div class="status-text">
+      <strong id="statusTitle">Parsing document…</strong>
+      <span id="statusDetail"></span>
+    </div>
+  </div>
+
+  <div id="results"></div>
+</main>
+
+<footer>
+  Current rule text fetched from the <a href="https://www.ecfr.gov/developers/documentation/api/v1" target="_blank">eCFR versioner API v1</a>
+  via <code>/api/versioner/v1/full/{date}/title-10.xml?part={P}&amp;section={P.S}</code>
+  — date from <code>/api/versioner/v1/titles.json</code> <code>up_to_date_as_of</code>.
+  Only paragraphs referenced in the proposed rule are shown; <em>* * * * *</em> spans collapse unchanged text.
+</footer>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// Utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+function setStatus(icon, title, detail, visible = true) {
+  document.getElementById('statusBar').classList.toggle('visible', visible);
+  document.getElementById('statusIcon').textContent = icon;
+  document.getElementById('statusTitle').textContent = title;
+  document.getElementById('statusDetail').textContent = detail;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function trunc(str, n) {
+  return str.length > n ? str.slice(0, n) + '…' : str;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 1 — Parse Federal Register document into amendment objects
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Each amendment object:
+//   { num, instruction, sections[], part, proposedChunks[], substitutions[] }
+//
+// proposedChunks — ordered array used when the FR supplies full replacement text:
+//   { type: 'omit' }                  — "* * * * *" unchanged-text marker
+//   { type: 'para', label, text }     — paragraph with its designator
+//   { type: 'header', text }          — section/subpart heading line
+//
+// substitutions — used when the instruction *is* the amendment (no body text):
+//   { para, ops: [{ remove, add }] }
+//   e.g. para="(e)", ops=[{ remove:"part 52", add:"part 52 or part 53" }]
+
+function parseAmendments(htmlText) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = htmlText;
+  const pre = tmp.querySelector('pre');
+  const rawText = pre ? pre.innerText : tmp.innerText;
+  const lines = rawText.split('\n');
+
+  const amendments = [];
+  const sectionRefRe = /(?:Sec\.|§)\s*(\d+\.\d+[\w.]*)/g;
+
+  let current = null;
+  let bodyLines = [];
+  let inBody = false;
+
+  // ── helpers ──────────────────────────────────────────────────────────────
+
+  // Returns true when a line is a continuation of an instruction header.
+  // Also handles the case where a [[Page NNN]] marker interrupts the sentence.
+  function isInstructionContinuation(line) {
+    const ls = line.trimEnd();
+    const trimmed = ls.trim();
+    if (!trimmed) return false;                           // blank — see lookahead below
+    if (trimmed === '0') return false;                    // FR paragraph separator
+    if (/^PART \d+/i.test(trimmed)) return false;         // part header
+    if (/^Sec\.\s+\d+\.\d+/.test(trimmed)) return false;  // section heading
+    if (/^Sec\.\s+\d+\.\d+.*\[Amended\]/i.test(trimmed)) return false;
+    if (ls.startsWith('    ')) return false;              // 4-space body indent
+    if (/^\[\[Page \d+\]\]/.test(trimmed)) return false;  // page marker itself — skip via lookahead
+    return true;
+  }
+
+  // Lookahead: from position j, skip blank lines and [[Page]] markers and
+  // return the index of the first substantive line (or lines.length if none).
+  function skipPageBreak(j) {
+    while (j < lines.length) {
+      const t = lines[j].trim();
+      if (!t || /^\[\[Page \d+\]\]/.test(t)) { j++; continue; }
+      return j;
+    }
+    return j;
+  }
+
+  function finalizeAmend() {
+    if (!current) return;
+    current.proposedChunks = parseProposedChunks(bodyLines.join('\n'));
+    current.substitutions = current.proposedChunks.length
+      ? []
+      : parseSubstitutionInstruction(current.instruction);
+    const hasContent = current.proposedChunks.length || current.substitutions.length || current.sections.length;
+    if (hasContent) amendments.push(current);
+    current = null;
+    bodyLines = [];
+    inBody = false;
+  }
+
+  // ── main pass ─────────────────────────────────────────────────────────────
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trimEnd();
+    const trimmed = line.trim();
+
+    if (trimmed === '0') { i++; continue; }
+
+    const match = trimmed.match(/^(\d+)\.\s+(.+)/);
+    const isAmendStart = match &&
+      /(?:Revise|Amend|Add|Remove|Redesignate|In Sec\.|In §)/i.test(trimmed);
+
+    if (isAmendStart) {
+      finalizeAmend();
+
+      // ── Collect the full (possibly wrapped) instruction text ──────────────
+      // Lines continue as long as they pass isInstructionContinuation.
+      // Special case: a blank + [[Page NNN]] + blank may interrupt a sentence
+      // mid-word — we look ahead past it and continue if the resuming line
+      // is still a non-body, non-separator continuation.
+      const instrLines = [trimmed];
+      let j = i + 1;
+      while (j < lines.length) {
+        const cur = lines[j];
+        const curTrimmed = cur.trim();
+
+        if (isInstructionContinuation(cur)) {
+          instrLines.push(curTrimmed);
+          j++;
+          continue;
+        }
+
+        // Hit a blank or page-break — peek ahead to see if the instruction resumes
+        if (!curTrimmed || /^\[\[Page \d+\]\]/.test(curTrimmed)) {
+          const resume = skipPageBreak(j);
+          if (resume < lines.length) {
+            const resumeLine = lines[resume];
+            // Resume only if the next substantive line is still an instruction
+            // continuation (not a section heading, not a body indent, not '0')
+            if (isInstructionContinuation(resumeLine) &&
+                !resumeLine.trim().startsWith('a.') &&
+                !resumeLine.trim().startsWith('b.')) {
+              instrLines.push(resumeLine.trim());
+              j = resume + 1;
+              continue;
+            }
+          }
+        }
+        break;
+      }
+      // Join with a single space (the FR wraps at ~72 chars with no hyphenation)
+      const fullInstruction = instrLines.join(' ').replace(/\s+/g, ' ').trim();
+
+      // Extract section references and part from the FULL instruction
+      const sections = [];
+      let m;
+      sectionRefRe.lastIndex = 0;
+      while ((m = sectionRefRe.exec(fullInstruction)) !== null) sections.push(m[1]);
+      const partMatch = fullInstruction.match(/part\s+(\d+)/i);
+      const part = sections.length ? sections[0].split('.')[0] : (partMatch ? partMatch[1] : null);
+
+      current = { num: match[1], instruction: fullInstruction, sections, part };
+      inBody = false;
+      i = j; // resume after the instruction lines
+      continue;
+
+    } else if (current) {
+      const secHeaderRe = /^Sec\.\s+\d+\.\d+|^§\s*\d+\.\d+/;
+      if (secHeaderRe.test(trimmed) && !inBody) inBody = true;
+      if (inBody || bodyLines.length > 0) bodyLines.push(line);
+    }
+
+    i++;
+  }
+  finalizeAmend();
+  return amendments;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Parse substitution operations from an instruction-only amendment.
+//
+// Real patterns found in this document:
+//
+//  A. Direct inline:
+//     "In Sec. 2.1, in paragraph (e) remove the phrase ``X'' and add in its
+//      place the phrase ``Y''."
+//
+//  B. Multiple paragraphs, single instruction:
+//     "In Sec. 20.1406, in paragraphs (a) and (b), wherever it appears,
+//      remove the phrase ``X'' and add in its place the phrase ``Y''."
+//
+//  C. Compound with semicolon:
+//     "In Sec. 2.1502, in paragraph (a), remove ``X'' and add ``Y'';
+//      and in paragraph (b)(1), wherever it appears, remove ``A'' and add ``B''."
+//
+//  D. "Amend Sec. X by: / a. ... / b. ..." sub-clause pattern
+//     (sub-clauses stored in amend.subClauses[] and processed separately)
+//
+//  E. Add-only (no removal):
+//     "In Sec. 19.20, add the number ``53,'' in sequential order."
+//
+//  F. Add after / before anchor:
+//     "add ``Y'' after ``X''"  /  "add ``Y'' before ``X''"
+//
+// Returns: [ { para, paras[], wherever, ops: [{ remove, add }] }, ... ]
+//   para   — single paragraph designator e.g. "(e)" or null
+//   paras  — array when multiple paragraphs named e.g. ["(a)","(b)"]
+//   wherever — boolean: true if "wherever it appears" (replace all occurrences)
+// ─────────────────────────────────────────────────────────────────────────────
+function parseSubstitutionInstruction(instruction) {
+  // Normalise FR typographic quotes to straight double quotes
+  const text = normalizeQuotes(instruction);
+  const results = [];
+
+  // ── Compound semicolon-separated clauses ─────────────────────────────────
+  // Split on "; and" or "; " at clause boundaries (not inside quotes)
+  const clauses = splitClauses(text);
+
+  let inheritedParas = null; // carry paragraph context across clauses
+
+  for (const clause of clauses) {
+    // Extract paragraph target(s) from this clause
+    // Handles: "in paragraph (e)", "in paragraphs (a) and (b)",
+    //          "in paragraph (b)(1)", "in paragraphs (a)(4) and (5)"
+    const { para, paras } = extractParaTarget(clause) ||
+      (inheritedParas ? { para: inheritedParas[0] || null, paras: inheritedParas } : { para: null, paras: [] });
+
+    if (paras && paras.length) inheritedParas = paras;
+
+    const wherever = /wherever it appears/i.test(clause);
+    const ops = extractOps(clause);
+
+    if (ops.length) {
+      const effectiveParas = (paras && paras.length) ? paras : (para ? [para] : [null]);
+      for (const p of effectiveParas) {
+        const existing = results.find(r => r.para === p && !r.ops.length);
+        if (existing) { existing.ops.push(...ops); existing.wherever = existing.wherever || wherever; }
+        else results.push({ para: p, paras: effectiveParas, wherever, ops });
+      }
+    }
+  }
+
+  return results;
+}
+
+function normalizeQuotes(s) {
+  return s
+    .replace(/``/g, '"').replace(/''/g, '"')
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'");
+}
+
+// Split instruction text into clauses on "; and" / "; " outside of quoted strings
+function splitClauses(text) {
+  const parts = [];
+  let depth = 0, start = 0, inQuote = false;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '"') inQuote = !inQuote;
+    if (!inQuote && text[i] === ';') {
+      parts.push(text.slice(start, i).trim());
+      // skip optional " and "
+      let j = i + 1;
+      while (j < text.length && /[\s]/.test(text[j])) j++;
+      if (text.slice(j, j + 4).toLowerCase() === 'and ') j += 4;
+      start = j;
+      i = j - 1;
+    }
+  }
+  parts.push(text.slice(start).trim());
+  return parts.filter(Boolean);
+}
+
+// Extract paragraph target(s) from a clause string.
+// Returns { para, paras } or null.
+function extractParaTarget(clause) {
+  // "in paragraph (X)" or "in paragraphs (X) and (Y)" or "in paragraph (X)(Y)"
+  const m = clause.match(
+    /in\s+paragraphs?\s+((?:\([^)]+\))+(?:\s+(?:and|or)\s+(?:\([^)]+\))+)*)/i
+  );
+  if (!m) return null;
+
+  const raw = m[1];
+  // Extract all (...) groups
+  const all = [];
+  let pos = 0;
+  while (pos < raw.length) {
+    if (raw[pos] === '(') {
+      const close = raw.indexOf(')', pos);
+      if (close === -1) break;
+      // Collect consecutive (...) groups as one designator
+      let label = '';
+      let p2 = pos;
+      while (p2 < raw.length && raw[p2] === '(') {
+        const c2 = raw.indexOf(')', p2);
+        if (c2 === -1) break;
+        label += raw.slice(p2, c2 + 1);
+        p2 = c2 + 1;
+      }
+      all.push(label);
+      pos = p2;
+    } else {
+      pos++;
+    }
+  }
+
+  if (!all.length) return null;
+  return { para: all[0], paras: all };
+}
+
+// Extract { remove, add } operation pairs from a single clause string.
+function extractOps(clause) {
+  const ops = [];
+
+  // Pattern 1: remove "X" and add "Y" (most common)
+  // Handles: "remove the phrase "X" and add in its place the phrase "Y""
+  //          "removing "X" and adding, in its place, "Y""
+  const removeAddRe = /remov(?:e|ing)\s+(?:the\s+)?(?:phrase\s+|cross[- ]reference\s+|definition\s+of\s+)?("([^"]+)")\s+and\s+add(?:ing)?(?:[^"]*?)?("([^"]+)")/gi;
+  let m;
+  while ((m = removeAddRe.exec(clause)) !== null) {
+    ops.push({ remove: m[2], add: m[4] });
+  }
+  if (ops.length) return ops;
+
+  // Pattern 2: add "Y" after "X"
+  const addAfterRe = /add(?:ing)?\s+(?:the\s+)?(?:words?\s+|phrase\s+|number\s+)?("([^"]+)")\s+after\s+(?:the\s+)?(?:words?\s+|phrase\s+)?("([^"]+)")/i;
+  const addAfterM = clause.match(addAfterRe);
+  if (addAfterM) {
+    ops.push({ remove: addAfterM[4], add: addAfterM[4] + ' ' + addAfterM[2] });
+    return ops;
+  }
+
+  // Pattern 3: add "Y" before "X"
+  const addBeforeRe = /add(?:ing)?\s+(?:the\s+)?(?:words?\s+|phrase\s+)?("([^"]+)")\s+before\s+(?:the\s+)?(?:words?\s+|phrase\s+)?("([^"]+)")/i;
+  const addBeforeM = clause.match(addBeforeRe);
+  if (addBeforeM) {
+    ops.push({ remove: addBeforeM[4], add: addBeforeM[2] + ' ' + addBeforeM[4] });
+    return ops;
+  }
+
+  // Pattern 4: remove "X" only (no replacement)
+  const removeOnlyRe = /remov(?:e|ing)\s+(?:the\s+)?(?:phrase\s+|cross[- ]reference\s+|definition\s+of\s+)?("([^"]+)")/i;
+  const removeOnlyM = clause.match(removeOnlyRe);
+  if (removeOnlyM) {
+    ops.push({ remove: removeOnlyM[2], add: '' });
+    return ops;
+  }
+
+  // Pattern 5: add "X" in sequential order / at the end / add number "X"
+  const addOnlyRe = /add(?:ing)?\s+(?:a\s+sentence[^"]*reading\s+)?(?:the\s+)?(?:words?\s+|phrase\s+|number\s+)?("([^"]+)")/i;
+  const addOnlyM = clause.match(addOnlyRe);
+  if (addOnlyM) {
+    ops.push({ remove: null, add: addOnlyM[2] });
+    return ops;
+  }
+
+  return ops;
+}
+
+// Apply substitution ops to source text.
+// op.wherever = true → replace all occurrences; false → first only.
+function applySubstitutions(sourceText, ops, wherever) {
+  let result = sourceText;
+  for (const op of ops) {
+    if (op.remove) {
+      const flags = wherever ? 'gi' : 'i';
+      const re = new RegExp(escapeRegex(op.remove), flags);
+      if (re.test(result)) {
+        result = result.replace(re, op.add);
+      } else {
+        // Not found verbatim — note it visibly
+        if (op.add) result = result.trimEnd() + ' ' + op.add;
+      }
+    } else {
+      // Add-only: append to end
+      result = result.trimEnd() + ' ' + op.add;
+    }
+  }
+  return result;
+}
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Federal Register paragraph designators look like:
+//   (a)  (b)(1)  (a)(2)(iii)  (a)(1)(i)(A)  * * * * *
+//
+// We split the text on paragraph boundaries and classify each piece.
+
+// Matches a paragraph designator at the start of a line (possibly indented)
+const PARA_DESIGNATOR_RE = /^(\s*)\(([a-z0-9]+)\)/i;
+// Matches a "* * * * *" omission marker line
+const STARS_RE = /^\s*\*\s*\*\s*\*\s*\*\s*\*/;
+// Matches a section/subpart heading (Sec. X.Y  or  Subpart X)
+const HEADING_RE = /^\s*(Sec\.\s+\d+\.\d+|Subpart\s+\w+|§\s*\d+\.\d+)/i;
+
+function parseProposedChunks(rawText) {
+  const lines = rawText.split('\n');
+  const chunks = [];
+  let currentLabel = null;
+  let currentLines = [];
+
+  function flush() {
+    if (currentLabel === null && currentLines.length === 0) return;
+    const text = currentLines.join('\n').trim();
+    if (!text) { currentLabel = null; currentLines = []; return; }
+    chunks.push({ type: 'para', label: currentLabel || '', text });
+    currentLabel = null;
+    currentLines = [];
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      // blank line — keep within current paragraph
+      if (currentLines.length) currentLines.push('');
+      continue;
+    }
+
+    if (STARS_RE.test(trimmed)) {
+      flush();
+      chunks.push({ type: 'omit' });
+      continue;
+    }
+
+    if (HEADING_RE.test(trimmed) && currentLabel === null && currentLines.length === 0) {
+      // Could be a heading or the very first line of a section (§ X.Y  Title.)
+      // Treat as a header chunk
+      flush();
+      chunks.push({ type: 'header', text: trimmed });
+      continue;
+    }
+
+    const designatorMatch = line.match(PARA_DESIGNATOR_RE);
+    if (designatorMatch) {
+      // Build the full designator by walking back through nested parents isn't
+      // feasible here, so we just use the raw opening designator text.
+      const label = buildDesignator(line);
+      flush();
+      currentLabel = label;
+      currentLines = [line];
+    } else {
+      // Continuation of current paragraph
+      currentLines.push(line);
+    }
+  }
+  flush();
+
+  // If we only got one chunk with no label it might be a simple full-replacement
+  // (no STARS, no paragraph markers) — keep it as a single para with no label.
+  return chunks;
+}
+
+// Extract the outermost paragraph designator string from a line, e.g. "(a)(2)(iii)"
+function buildDesignator(line) {
+  const trimmed = line.trim();
+  let pos = 0;
+  let label = '';
+  // Walk consecutive (...) groups
+  while (pos < trimmed.length && trimmed[pos] === '(') {
+    const close = trimmed.indexOf(')', pos);
+    if (close === -1) break;
+    label += trimmed.slice(pos, close + 1);
+    pos = close + 1;
+  }
+  return label || trimmed.slice(0, 10);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 2 — eCFR API: fetch section and parse into paragraph map
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Endpoints (confirmed live):
+//   GET /api/versioner/v1/titles.json          → up_to_date_as_of per title
+//   GET /api/versioner/v1/full/{date}/title-10.xml?part={P}&section={P.S}
+//                                              → processed section XML
+
+let _title10Date = null;
+
+async function getTitle10Date() {
+  if (_title10Date) return _title10Date;
+  try {
+    const r = await fetch('https://www.ecfr.gov/api/versioner/v1/titles.json');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const t = d.titles.find(t => t.number === 10);
+    if (t?.up_to_date_as_of) { _title10Date = t.up_to_date_as_of; return _title10Date; }
+  } catch(e) { console.warn('titles.json failed:', e); }
+  _title10Date = '2026-04-14';
+  return _title10Date;
+}
+
+// Returns a paragraph map: label → text, plus a special '_full_' key with raw text.
+// Labels match paragraph designators like "(a)", "(b)(2)", etc.
+async function fetchEcfrParagraphMap(part, section) {
+  const date = await getTitle10Date();
+  const url = `https://www.ecfr.gov/api/versioner/v1/full/${date}/title-10.xml?part=${part}&section=${section}`;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const xml = await r.text();
+    return parseXmlIntoParagraphMap(xml, section);
+  } catch(e) {
+    console.warn(`eCFR fetch failed §${section}:`, e.message);
+    return null;
+  }
+}
+
+// Parse eCFR versioner XML into { label → text } map.
+// Also stores '_full_' with the full section text for reference.
+function parseXmlIntoParagraphMap(xmlText, sectionNum) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlText, 'text/xml');
+  if (doc.querySelector('parsererror')) return null;
+
+  // Find the root section element
+  let root = null;
+  const sectno = doc.querySelector('SECTNO');
+  if (sectno) {
+    root = doc.documentElement;
+  } else {
+    const divs = doc.querySelectorAll('DIV8, DIV9, SECTION');
+    for (const div of divs) {
+      const n = (div.getAttribute('N') || '').replace(/[§\s]/g, '');
+      if (n === sectionNum || n.endsWith(sectionNum)) { root = div; break; }
+    }
+    if (!root) root = doc.documentElement;
+  }
+
+  // Walk the children and collect paragraph elements tagged P, FP, FP-1, FP-2
+  // Each P element may start with a paragraph designator like "(a)" in its text.
+  const map = {};
+  const allText = xmlToText(root).trim();
+  map['_full_'] = allText;
+
+  // Build label→text by scanning P/FP children for leading designators
+  const pNodes = root.querySelectorAll('P, FP, FP-1, FP-2, FPTEXT');
+  for (const p of pNodes) {
+    const text = p.textContent.trim();
+    const labelMatch = text.match(/^\(([a-z0-9]+)\)/i);
+    if (labelMatch) {
+      // Collect full designator
+      const label = extractLeadingDesignator(text);
+      if (label) map[label] = text;
+    }
+  }
+
+  return map;
+}
+
+function extractLeadingDesignator(text) {
+  let pos = 0;
+  let label = '';
+  const t = text.trim();
+  while (pos < t.length && t[pos] === '(') {
+    const close = t.indexOf(')', pos);
+    if (close === -1) break;
+    label += t.slice(pos, close + 1);
+    pos = close + 1;
+    if (pos >= t.length || t[pos] !== '(') break;
+  }
+  return label || null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// eCFR XML → plain text (for full section display)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function xmlToText(node) {
+  if (!node) return '';
+  if (node.nodeType === 3) return node.textContent.replace(/\s+/g, ' ');
+  const tag = (node.tagName || '').toUpperCase();
+  const ch = Array.from(node.childNodes).map(xmlToText).join('');
+  const blocks = {
+    'SECTNO':  t => `§ ${t.trim()}\n`,
+    'SUBJECT': t => `${t.trim()}\n`,
+    'HEAD':    t => `${t.trim()}\n`,
+    'HD':      t => `\n${t.trim()}\n`,
+    'P':       t => `\n${t.trim()}\n`,
+    'FP':      t => `\n${t.trim()}\n`,
+    'FP-1':    t => `\n    ${t.trim()}\n`,
+    'FP-2':    t => `\n        ${t.trim()}\n`,
+    'FPTEXT':  t => `\n${t.trim()}\n`,
+    'NOTE':    t => `\n[Note: ${t.trim()}]\n`,
+    'CITA':    t => `\n[${t.trim()}]\n`,
+    'AUTH':    t => `\nAuthority: ${t.trim()}\n`,
+    'SOURCE':  t => `\nSource: ${t.trim()}\n`,
+    'STARS':   _  => '\n* * * * *\n',
+    'E': t => t, 'SU': t => t, 'I': t => t,
+  };
+  return blocks[tag] ? blocks[tag](ch) : ch;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 3 — Word-level diff between two text strings
+// ─────────────────────────────────────────────────────────────────────────────
+
+function computeDiff(oldText, newText) {
+  const tok = t => t.match(/(\S+|\s+)/g) || [];
+  const a = tok(oldText), b = tok(newText);
+  if (a.length > 2000 || b.length > 2000) {
+    return { oldHtml: esc(oldText), newHtml: esc(newText) };
+  }
+  const m = a.length, n = b.length;
+  const dp = Array.from({length: m+1}, () => new Uint16Array(n+1));
+  for (let i = m-1; i >= 0; i--)
+    for (let j = n-1; j >= 0; j--)
+      dp[i][j] = a[i]===b[j] ? dp[i+1][j+1]+1 : Math.max(dp[i+1][j], dp[i][j+1]);
+  const op = [], np = [];
+  let i = 0, j = 0;
+  while (i < m || j < n) {
+    if (i<m && j<n && a[i]===b[j]) { op.push(esc(a[i])); np.push(esc(b[j])); i++; j++; }
+    else if (j<n && (i>=m || dp[i][j+1]>=dp[i+1][j])) { np.push(`<span class="diff-add">${esc(b[j])}</span>`); j++; }
+    else { op.push(`<span class="diff-del">${esc(a[i])}</span>`); i++; }
+  }
+  return { oldHtml: op.join(''), newHtml: np.join('') };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 4 — Align proposed chunks with eCFR paragraph map, build diff rows
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// For each proposed chunk:
+//   'omit'   → show a collapsed "unchanged text" row spanning both columns
+//   'header' → show section heading row (no diff)
+//   'para'   → look up the matching eCFR paragraph by label, diff them
+//              If no label, compare to the full section text (simple full-replace)
+
+function buildDiffRows(proposedChunks, ecfrMap) {
+  const rows = [];
+
+  for (const chunk of proposedChunks) {
+    if (chunk.type === 'omit') {
+      rows.push({ type: 'omit' });
+      continue;
+    }
+    if (chunk.type === 'header') {
+      rows.push({ type: 'header', text: chunk.text });
+      continue;
+    }
+
+    // type === 'para'
+    const proposed = chunk.text;
+    const label = chunk.label;
+
+    // Find matching eCFR text.
+    // Priority: exact label match → prefix match → full section text
+    let ecfr = null;
+    if (ecfrMap) {
+      if (label && ecfrMap[label]) {
+        ecfr = ecfrMap[label];
+      } else if (label) {
+        // Try prefix: "(b)(2)" might match an eCFR paragraph with that prefix
+        for (const [k, v] of Object.entries(ecfrMap)) {
+          if (k !== '_full_' && (k.startsWith(label) || label.startsWith(k))) {
+            ecfr = v; break;
+          }
+        }
+      }
+      // If still no match and this is the only / first chunk, use full section
+      if (!ecfr && proposedChunks.filter(c => c.type === 'para').length === 1) {
+        ecfr = ecfrMap['_full_'] || null;
+      }
+    }
+
+    if (ecfr) {
+      const { oldHtml, newHtml } = computeDiff(ecfr, proposed);
+      rows.push({ type: 'diff', label, oldHtml, newHtml });
+    }
+    // If no eCFR match found, suppress — only show paragraphs where we have
+    // current text to compare against the proposed change.
+  }
+
+  return rows;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 5 — Render diff rows into HTML
+// ─────────────────────────────────────────────────────────────────────────────
+
+function renderDiffRows(rows) {
+  let html = `
+    <div class="diff-pane-header">
+      <div class="diff-col-label current">Current eCFR text</div>
+      <div class="diff-col-label proposed">Proposed text</div>
+    </div>`;
+
+  for (const row of rows) {
+    if (row.type === 'omit') {
+      html += `
+        <div class="diff-row omitted">
+          <div class="diff-cell current">* * * * *  (unchanged text omitted)</div>
+          <div class="diff-cell proposed">* * * * *  (unchanged text omitted)</div>
+        </div>`;
+    } else if (row.type === 'header') {
+      html += `
+        <div class="diff-row omitted">
+          <div class="diff-cell current" style="font-style:normal;font-weight:600;">${esc(row.text)}</div>
+          <div class="diff-cell proposed" style="font-style:normal;font-weight:600;">${esc(row.text)}</div>
+        </div>`;
+    } else if (row.type === 'diff') {
+      const labelBadge = row.label ? `<span class="para-label">${esc(row.label)}</span>` : '';
+      html += `
+        <div class="diff-row">
+          <div class="diff-cell current">${labelBadge}${row.oldHtml}</div>
+          <div class="diff-cell proposed">${labelBadge}${row.newHtml}</div>
+        </div>`;
+    }
+  }
+
+  return html;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Render amendment cards
+// ─────────────────────────────────────────────────────────────────────────────
+
+function renderAmendments(amendments) {
+  const container = document.getElementById('results');
+  if (!amendments.length) {
+    container.innerHTML = `<div class="empty-state"><div class="icon">🔍</div>No numbered amendment instructions found.<br>Make sure you've uploaded a Federal Register proposed or final rule.</div>`;
+    return;
+  }
+
+  // ── Collect unique parts in the order they first appear ──
+  const partOrder = [];
+  const partCounts = {};
+  for (const amend of amendments) {
+    const p = amend.part || '—';
+    if (!partCounts[p]) { partCounts[p] = 0; partOrder.push(p); }
+    partCounts[p]++;
+  }
+  partOrder.sort((a, b) => (a === '—' ? 1 : b === '—' ? -1 : Number(a) - Number(b)));
+
+  // ── Header row ──
+  const hdr = document.createElement('div');
+  hdr.className = 'amendments-header';
+  hdr.innerHTML = `<h2>Proposed Amendments</h2><span class="badge">${amendments.length} found</span>`;
+  container.appendChild(hdr);
+
+  // ── Filter bar (only show if more than one distinct part) ──
+  let activePart = 'all';
+  let filterCount = null;
+
+  if (partOrder.length > 1) {
+    const bar = document.createElement('div');
+    bar.className = 'filter-bar';
+    bar.innerHTML = `<span class="filter-label">Filter by Part</span>`;
+
+    const allPill = document.createElement('button');
+    allPill.className = 'filter-pill active';
+    allPill.textContent = `All (${amendments.length})`;
+    allPill.dataset.part = 'all';
+    bar.appendChild(allPill);
+
+    for (const p of partOrder) {
+      const pill = document.createElement('button');
+      pill.className = 'filter-pill';
+      pill.textContent = `Part ${p} (${partCounts[p]})`;
+      pill.dataset.part = p;
+      bar.appendChild(pill);
+    }
+
+    filterCount = document.createElement('span');
+    filterCount.className = 'filter-count';
+    bar.appendChild(filterCount);
+
+    bar.addEventListener('click', e => {
+      const pill = e.target.closest('.filter-pill');
+      if (!pill) return;
+      activePart = pill.dataset.part;
+      bar.querySelectorAll('.filter-pill').forEach(p => p.classList.toggle('active', p === pill));
+      applyFilter();
+    });
+
+    container.appendChild(bar);
+  }
+
+  // ── Cards ──
+  const cards = document.createElement('div');
+  cards.className = 'amendment-cards';
+  container.appendChild(cards);
+
+  amendments.forEach((amend, idx) => {
+    const card = document.createElement('div');
+    card.className = 'amendment-card';
+    card.dataset.part = amend.part || '—';
+
+    const sectionLabel = amend.sections.length
+      ? amend.sections.map(s => `§ ${s}`).join(', ')
+      : (amend.part ? `Part ${amend.part}` : '');
+
+    const ecfrLinks = amend.sections.map(s => {
+      const p = s.split('.')[0];
+      return `<a href="https://www.ecfr.gov/current/title-10/part-${p}/section-${s}" target="_blank">§ ${s} on eCFR ↗</a>`;
+    }).join(' · ');
+
+    const hasContent = (amend.proposedChunks && amend.proposedChunks.length > 0)
+      || (amend.substitutions && amend.substitutions.length > 0);
+
+    card.innerHTML = `
+      <div class="amendment-card-header">
+        <span class="amend-num">#${amend.num}</span>
+        <span class="amend-title">${esc(trunc(amend.instruction, 90))}</span>
+        ${sectionLabel ? `<span class="amend-cfr">${esc(sectionLabel)}</span>` : ''}
+        <span class="amend-toggle">▼</span>
+      </div>
+      <div class="amendment-body">
+        <div class="amend-meta">
+          <span class="instruction">${esc(amend.instruction)}</span>
+          ${ecfrLinks}
+        </div>
+        <div id="diff-${idx}">
+          ${hasContent
+            ? `<div class="loading-ecfr"><div class="spinner"></div>Fetching current eCFR text…</div>`
+            : `<div class="ecfr-error">⚠ No proposed text block detected after this instruction.</div>`}
+        </div>
+      </div>`;
+
+    card.querySelector('.amendment-card-header').addEventListener('click', () => {
+      const wasOpen = card.classList.contains('open');
+      card.classList.toggle('open');
+      if (!wasOpen && hasContent) loadDiff(amend, idx);
+    });
+
+    cards.appendChild(card);
+  });
+
+  // ── Filter function ──
+  function applyFilter() {
+    let visible = 0;
+    cards.querySelectorAll('.amendment-card').forEach(card => {
+      const show = activePart === 'all' || card.dataset.part === activePart;
+      card.classList.toggle('hidden', !show);
+      if (show) visible++;
+    });
+    if (filterCount) {
+      filterCount.textContent = activePart === 'all'
+        ? '' : `${visible} amendment${visible !== 1 ? 's' : ''}`;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Load diff on demand (lazy)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const loaded = new Set();
+
+async function loadDiff(amend, idx) {
+  if (loaded.has(idx)) return;
+  loaded.add(idx);
+  const area = document.getElementById(`diff-${idx}`);
+  if (!area) return;
+
+  // ── Path A: substitution-only amendment (instruction carries the ops) ──
+  if (amend.substitutions && amend.substitutions.length) {
+    await loadSubstitutionDiff(amend, area);
+    return;
+  }
+
+  // ── Path B: full proposed text block ──
+  let ecfrMap = null;
+  for (const sec of amend.sections) {
+    const part = sec.split('.')[0];
+    ecfrMap = await fetchEcfrParagraphMap(part, sec);
+    if (ecfrMap) break;
+  }
+
+  const rows = buildDiffRows(amend.proposedChunks, ecfrMap);
+
+  if (!rows.length) {
+    area.innerHTML = `<div class="ecfr-error">⚠ Could not build comparison — no structured chunks found.</div>`;
+    return;
+  }
+
+  const diffHtml = renderDiffRows(rows);
+
+  if (!ecfrMap) {
+    area.innerHTML = `
+      <div class="ecfr-error">⚠ Could not retrieve current eCFR text for ${amend.sections.map(s=>`§ ${s}`).join(', ')}.
+      This may be a new section proposed for the first time, or the eCFR API is unavailable.</div>
+      <div class="proposed-only">${esc(amend.proposedChunks.map(c => c.text || (c.type==='omit'?'* * * * *':'')).join('\n\n'))}</div>`;
+    return;
+  }
+
+  area.innerHTML = diffHtml;
+}
+
+// Build the diff for a substitution-only amendment.
+// For each substitution group (targeting a paragraph):
+//   1. Fetch the eCFR paragraph text
+//   2. Apply the ops to synthesize the proposed text
+//   3. Diff original vs. synthesized
+async function loadSubstitutionDiff(amend, area) {
+  let ecfrMap = null;
+  for (const sec of amend.sections) {
+    ecfrMap = await fetchEcfrParagraphMap(sec.split('.')[0], sec);
+    if (ecfrMap) break;
+  }
+
+  if (!ecfrMap) {
+    area.innerHTML = `
+      <div class="ecfr-error">⚠ Could not retrieve current eCFR text for ${amend.sections.map(s=>`§ ${s}`).join(', ')}.
+      Cannot apply substitution without the source text.</div>`;
+    return;
+  }
+
+  const rows = [];
+
+  for (const sub of amend.substitutions) {
+    const { ops, wherever } = sub;
+
+    // Resolve the set of paragraph labels to operate on.
+    // sub.paras may list multiple e.g. ["(a)","(b)"] for "in paragraphs (a) and (b)"
+    const targetParas = (sub.paras && sub.paras.length) ? sub.paras : [sub.para];
+
+    for (const para of targetParas) {
+      // Locate the eCFR source text for this paragraph
+      let ecfrText = null;
+
+      if (para) {
+        ecfrText = ecfrMap[para] || null;
+        if (!ecfrText) {
+          // Prefix / suffix match (e.g. stored as "(a)(1)" but targeting "(a)")
+          for (const [k, v] of Object.entries(ecfrMap)) {
+            if (k !== '_full_' && (k.startsWith(para) || para.startsWith(k))) {
+              ecfrText = v; break;
+            }
+          }
+        }
+      }
+
+      // Fall back to full section text only when no paragraph was specified
+      if (!ecfrText && !para) ecfrText = ecfrMap['_full_'] || null;
+
+      if (!ecfrText) continue; // no source text found — skip silently
+
+      const proposedText = applySubstitutions(ecfrText, ops, wherever);
+      if (proposedText === ecfrText) continue; // substitution made no change
+
+      const { oldHtml, newHtml } = computeDiff(ecfrText, proposedText);
+      rows.push({ type: 'diff', label: para || '', oldHtml, newHtml });
+    }
+  }
+
+  if (!rows.length) {
+    area.innerHTML = `<div class="ecfr-error">⚠ Could not match the substitution phrases in the current eCFR text. The phrases may differ from the version in effect when this proposed rule was published, or the paragraph could not be located.</div>`;
+    return;
+  }
+
+  area.innerHTML = renderDiffRows(rows);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// File handling
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function handleFile(file) {
+  setStatus('⏳', 'Reading file…', file.name);
+  const text = await file.text();
+  setStatus('🔍', 'Parsing amendments…', 'Scanning for numbered amendment instructions');
+  await new Promise(r => setTimeout(r, 60));
+  const amendments = parseAmendments(text);
+  document.getElementById('results').innerHTML = '';
+  setStatus('✅',
+    `Found ${amendments.length} amendment${amendments.length !== 1 ? 's' : ''}`,
+    'Click any amendment to load its comparison with current eCFR text');
+  renderAmendments(amendments);
+}
+
+document.getElementById('fileInput').addEventListener('change', e => {
+  const f = e.target.files[0]; if (f) handleFile(f);
+});
+const ua = document.getElementById('uploadArea');
+ua.addEventListener('dragover', e => { e.preventDefault(); ua.classList.add('drag-over'); });
+ua.addEventListener('dragleave', () => ua.classList.remove('drag-over'));
+ua.addEventListener('drop', e => {
+  e.preventDefault(); ua.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0]; if (f) handleFile(f);
+});
+</script>
+</body>
+</html>
