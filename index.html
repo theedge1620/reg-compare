@@ -31,11 +31,19 @@
   body { font-family: 'Georgia', serif; background: var(--paper); color: var(--ink); min-height: 100vh; display: flex; flex-direction: column; }
 
   header { background: var(--ink); color: var(--white); padding: 0 2rem; height: 56px; display: flex; align-items: center; gap: 1rem; flex-shrink: 0; }
-  .logo { font-family: 'Georgia', serif; font-size: 1.25rem; font-weight: bold; letter-spacing: -0.02em; }
+  .logo { font-family: 'Georgia', serif; font-size: 1.25rem; font-weight: bold; letter-spacing: -0.02em; flex-shrink: 0; }
   .logo span { color: #7eb8e8; }
-  .tagline { font-size: 0.78rem; color: var(--ink-faint); font-family: sans-serif; border-left: 1px solid #333; padding-left: 1rem; margin-left: 0.5rem; }
+  .tagline { font-size: 0.78rem; color: var(--ink-faint); font-family: sans-serif; border-left: 1px solid #333; padding-left: 1rem; margin-left: 0.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  main { flex: 1; display: flex; flex-direction: column; max-width: 1400px; width: 100%; margin: 0 auto; padding: 2rem; gap: 1.5rem; }
+  /* ── top-level navigation ── */
+  nav.tabs { margin-left: auto; display: flex; gap: 0.25rem; align-self: stretch; flex-shrink: 0; }
+  .tab { font-family: sans-serif; font-size: 0.82rem; font-weight: 600; color: var(--ink-faint); background: none; border: none; border-bottom: 3px solid transparent; padding: 0 1rem; cursor: pointer; transition: color 0.15s, border-color 0.15s; white-space: nowrap; }
+  .tab:hover { color: #b8cfe8; }
+  .tab.active { color: var(--white); border-bottom-color: #7eb8e8; }
+
+  main { flex: 1; display: flex; flex-direction: column; max-width: 1400px; width: 100%; margin: 0 auto; padding: 2rem; }
+  .view { display: none; flex-direction: column; gap: 1.5rem; }
+  .view.active { display: flex; }
 
   .upload-area { border: 2px dashed var(--border); border-radius: var(--radius); background: var(--white); padding: 2.5rem 2rem; text-align: center; transition: border-color 0.2s, background 0.2s; cursor: pointer; position: relative; }
   .upload-area.drag-over { border-color: var(--accent); background: var(--accent-light); }
@@ -114,13 +122,74 @@
   /* hide cards that don't match the active filter */
   .amendment-card.hidden { display: none; }
 
+  /* ═══ Document Comparison view ═══════════════════════════════════════════ */
+
+  /* ── loaded-document chips ── */
+  .file-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .file-chips:empty { display: none; }
+  .file-chip { display: flex; align-items: center; gap: 0.5rem; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.4rem 0.6rem 0.4rem 0.4rem; font-family: sans-serif; font-size: 0.8rem; max-width: 100%; }
+  .file-chip.error { border-color: #e8c8c8; background: var(--del-bg); }
+  .doc-tag { display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border-radius: 4px; font-family: var(--mono); font-size: 0.75rem; font-weight: 700; color: var(--white); flex-shrink: 0; }
+  .file-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 22rem; }
+  .file-chip-meta { color: var(--ink-faint); font-size: 0.72rem; white-space: nowrap; }
+  .file-chip-remove { background: none; border: none; color: var(--ink-faint); cursor: pointer; font-size: 0.95rem; line-height: 1; padding: 0 0.15rem; }
+  .file-chip-remove:hover { color: var(--del); }
+  .chip-clear { background: none; border: 1px dashed var(--border); border-radius: var(--radius); color: var(--ink-muted); font-family: sans-serif; font-size: 0.75rem; padding: 0.4rem 0.7rem; cursor: pointer; }
+  .chip-clear:hover { border-color: var(--del); color: var(--del); }
+
+  /* ── run summary strip ── */
+  .cmp-summary { display: flex; flex-wrap: wrap; gap: 0 1.75rem; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.8rem 1.1rem; font-family: sans-serif; }
+  .cmp-stat { display: flex; flex-direction: column; gap: 0.1rem; }
+  .cmp-stat .n { font-size: 1.15rem; font-weight: 700; color: var(--ink); }
+  .cmp-stat .n.flag { color: var(--del); }
+  .cmp-stat .k { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-faint); }
+
+  /* ── conflict cards ── */
+  .conflict-card { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .conflict-card.hidden { display: none; }
+  .conflict-card-header { display: flex; align-items: center; padding: 0.75rem 1rem; gap: 0.75rem; cursor: pointer; user-select: none; transition: background 0.15s; }
+  .conflict-card-header:hover { background: var(--paper); }
+  .conflict-card.open .amend-toggle { transform: rotate(180deg); }
+  .conflict-body { display: none; border-top: 1px solid var(--border); }
+  .conflict-card.open .conflict-body { display: block; }
+
+  .sec-num { font-family: var(--mono); font-size: 0.78rem; font-weight: 700; background: var(--accent); color: var(--white); border-radius: 3px; padding: 0.1rem 0.45rem; flex-shrink: 0; }
+  .sec-title { font-family: sans-serif; font-size: 0.88rem; color: var(--ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sec-title.untitled { color: var(--ink-faint); font-style: italic; }
+  .sec-badge { font-family: sans-serif; font-size: 0.68rem; font-weight: 600; border-radius: 999px; padding: 0.1rem 0.5rem; white-space: nowrap; flex-shrink: 0; }
+  .sec-badge.variants { background: var(--warn-bg); color: var(--warn); }
+  .sec-badge.titles { background: var(--del-bg); color: var(--del); }
+  .sec-badge.sim { background: var(--omit-bg); color: var(--omit-fg); font-family: var(--mono); }
+  .sec-docs { display: flex; gap: 0.2rem; flex-shrink: 0; }
+  .sec-docs .doc-tag { width: 1.1rem; height: 1.1rem; font-size: 0.65rem; }
+  .sec-docs .doc-tag.absent { opacity: 0.22; }
+
+  /* ── redline pair picker ── */
+  .pair-picker { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; padding: 0.6rem 1.25rem; background: #f0f0f8; border-bottom: 1px solid var(--border); font-family: sans-serif; font-size: 0.8rem; color: var(--ink-muted); }
+  .pair-picker select { font-family: sans-serif; font-size: 0.8rem; padding: 0.25rem 0.4rem; border: 1px solid var(--border); border-radius: 4px; background: var(--white); color: var(--ink); max-width: 20rem; }
+  .pair-picker .vs { font-style: italic; color: var(--ink-faint); }
+  .pair-note { margin-left: auto; font-size: 0.75rem; color: var(--ink-faint); }
+  .pair-note.same { color: var(--add); }
+
+  .redline-area .diff-col-label.current { color: var(--del); }
+  .redline-area .diff-col-label.proposed { color: var(--add); }
+
+  .docx-note { padding: 0.75rem 1.25rem; font-family: sans-serif; font-size: 0.8rem; color: var(--ink-muted); background: var(--omit-bg); }
+
   footer { text-align: center; font-family: sans-serif; font-size: 0.75rem; color: var(--ink-faint); padding: 1.5rem 2rem; border-top: 1px solid var(--border); }
   footer a { color: var(--accent); text-decoration: none; }
   footer code { background: #eee; padding: 0.05rem 0.3rem; border-radius: 3px; }
+  .footer-note { display: none; max-width: 900px; margin: 0 auto; }
+  .footer-note.active { display: block; }
 
   @media (max-width: 700px) {
     .diff-pane-header, .diff-row { grid-template-columns: 1fr; }
     .diff-cell.current, .diff-col-label.current { border-right: none; border-bottom: 1px solid var(--border); }
+    header { padding: 0 1rem; gap: 0.5rem; }
+    .tagline { display: none; }
+    .tab { padding: 0 0.6rem; font-size: 0.75rem; }
+    main { padding: 1rem; }
+    .pair-note { margin-left: 0; }
   }
 </style>
 </head>
@@ -128,33 +197,72 @@
 
 <header>
   <div class="logo">Reg<span>Diff</span></div>
-  <div class="tagline">Federal Register proposed rules vs. current eCFR text</div>
+  <div class="tagline" id="tagline">Federal Register proposed rules vs. current eCFR text</div>
+  <nav class="tabs">
+    <button class="tab active" data-view="ecfr" type="button">eCFR Analysis</button>
+    <button class="tab" data-view="compare" type="button">Document Comparison</button>
+  </nav>
 </header>
 
 <main>
-  <div class="upload-area" id="uploadArea">
-    <input type="file" id="fileInput" accept=".html,.htm,.txt" />
-    <div class="upload-icon">📄</div>
-    <h2>Drop a Federal Register document here</h2>
-    <p>Accepts .html or .txt files from regulations.gov · Extracts proposed amendments automatically</p>
-  </div>
 
-  <div class="status-bar" id="statusBar">
-    <div class="status-icon" id="statusIcon">⏳</div>
-    <div class="status-text">
-      <strong id="statusTitle">Parsing document…</strong>
-      <span id="statusDetail"></span>
+  <!-- ═══ VIEW 1 — Federal Register document vs. current eCFR ═══════════ -->
+  <section class="view active" id="view-ecfr">
+    <div class="upload-area" id="uploadArea">
+      <input type="file" id="fileInput" accept=".html,.htm,.txt" />
+      <div class="upload-icon">📄</div>
+      <h2>Drop a Federal Register document here</h2>
+      <p>Accepts .html or .txt files from regulations.gov · Extracts proposed amendments automatically</p>
     </div>
-  </div>
 
-  <div id="results"></div>
+    <div class="status-bar" id="statusBar">
+      <div class="status-icon">⏳</div>
+      <div class="status-text">
+        <strong class="status-title">Parsing document…</strong>
+        <span class="status-detail"></span>
+      </div>
+    </div>
+
+    <div id="results"></div>
+  </section>
+
+  <!-- ═══ VIEW 2 — Multi-document .docx conflict comparison ═════════════ -->
+  <section class="view" id="view-compare">
+    <div class="upload-area" id="cmpUploadArea">
+      <input type="file" id="cmpFileInput" accept=".docx" multiple />
+      <div class="upload-icon">📚</div>
+      <h2>Drop two or more .docx files here</h2>
+      <p>Detects numbered sections in each document · Lists only sections that conflict between documents</p>
+    </div>
+
+    <div class="file-chips" id="cmpFileChips"></div>
+
+    <div class="status-bar" id="cmpStatusBar">
+      <div class="status-icon">⏳</div>
+      <div class="status-text">
+        <strong class="status-title">Reading documents…</strong>
+        <span class="status-detail"></span>
+      </div>
+    </div>
+
+    <div id="cmpResults"></div>
+  </section>
+
 </main>
 
 <footer>
-  Current rule text fetched from the <a href="https://www.ecfr.gov/developers/documentation/api/v1" target="_blank">eCFR versioner API v1</a>
-  via <code>/api/versioner/v1/full/{date}/title-10.xml?part={P}&amp;section={P.S}</code>
-  — date from <code>/api/versioner/v1/titles.json</code> <code>up_to_date_as_of</code>.
-  Only paragraphs referenced in the proposed rule are shown; <em>* * * * *</em> spans collapse unchanged text.
+  <div class="footer-note active" data-view="ecfr">
+    Current rule text fetched from the <a href="https://www.ecfr.gov/developers/documentation/api/v1" target="_blank">eCFR versioner API v1</a>
+    via <code>/api/versioner/v1/full/{date}/title-10.xml?part={P}&amp;section={P.S}</code>
+    — date from <code>/api/versioner/v1/titles.json</code> <code>up_to_date_as_of</code>.
+    Only paragraphs referenced in the proposed rule are shown; <em>* * * * *</em> spans collapse unchanged text.
+  </div>
+  <div class="footer-note" data-view="compare">
+    Sections are matched across documents by their number — <code>3.2.1</code>, <code>§ 50.55a</code>, <code>Section 5</code>.
+    A section is flagged when it appears in two or more documents with differing text.
+    Comparison ignores case, whitespace and smart-quote/dash styling; the redline shows the text verbatim.
+    Files are read entirely in your browser — nothing is uploaded.
+  </div>
 </footer>
 
 <script>
@@ -162,11 +270,17 @@
 // Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Drive one of the two status bars (each view owns one).
+function setStatusIn(barId, icon, title, detail, visible = true) {
+  const bar = document.getElementById(barId);
+  bar.classList.toggle('visible', visible);
+  bar.querySelector('.status-icon').textContent = icon;
+  bar.querySelector('.status-title').textContent = title;
+  bar.querySelector('.status-detail').textContent = detail;
+}
+
 function setStatus(icon, title, detail, visible = true) {
-  document.getElementById('statusBar').classList.toggle('visible', visible);
-  document.getElementById('statusIcon').textContent = icon;
-  document.getElementById('statusTitle').textContent = title;
-  document.getElementById('statusDetail').textContent = detail;
+  setStatusIn('statusBar', icon, title, detail, visible);
 }
 
 function esc(s) {
@@ -834,19 +948,24 @@ function buildDiffRows(proposedChunks, ecfrMap) {
 // STEP 5 — Render diff rows into HTML
 // ─────────────────────────────────────────────────────────────────────────────
 
-function renderDiffRows(rows) {
+function renderDiffRows(rows, leftLabel = 'Current eCFR text', rightLabel = 'Proposed text') {
   let html = `
     <div class="diff-pane-header">
-      <div class="diff-col-label current">Current eCFR text</div>
-      <div class="diff-col-label proposed">Proposed text</div>
+      <div class="diff-col-label current">${esc(leftLabel)}</div>
+      <div class="diff-col-label proposed">${esc(rightLabel)}</div>
     </div>`;
 
   for (const row of rows) {
     if (row.type === 'omit') {
+      // row.count is set by the paragraph-level aligner (doc comparison);
+      // the eCFR path uses the Federal Register's own "* * * * *" marker.
+      const note = row.count
+        ? `⋯ ${row.count} unchanged paragraph${row.count !== 1 ? 's' : ''}`
+        : '* * * * *  (unchanged text omitted)';
       html += `
         <div class="diff-row omitted">
-          <div class="diff-cell current">* * * * *  (unchanged text omitted)</div>
-          <div class="diff-cell proposed">* * * * *  (unchanged text omitted)</div>
+          <div class="diff-cell current">${esc(note)}</div>
+          <div class="diff-cell proposed">${esc(note)}</div>
         </div>`;
     } else if (row.type === 'header') {
       html += `
@@ -1135,6 +1254,747 @@ ua.addEventListener('drop', e => {
   e.preventDefault(); ua.classList.remove('drag-over');
   const f = e.dataTransfer.files[0]; if (f) handleFile(f);
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// VIEW 2 — Multi-document .docx conflict comparison
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Pipeline:
+//   .docx (ZIP)  →  word/document.xml  →  paragraphs  →  numbered sections
+//   →  cross-document index by section number
+//   →  keep only numbers present in ≥2 documents with ≥2 distinct text variants
+//   →  side-by-side redline for any chosen pair of documents
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DOCX — minimal ZIP reader (no dependencies)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// A .docx is a ZIP archive; the body text lives in word/document.xml. We locate
+// that entry via the central directory and inflate it with the platform's
+// DecompressionStream — no third-party unzip library required.
+
+const ZIP_EOCD   = 0x06054b50; // end of central directory
+const ZIP_CD     = 0x02014b50; // central directory file header
+const ZIP_LOCAL  = 0x04034b50; // local file header
+const ZIP64_LOC  = 0x07064b50; // zip64 EOCD locator
+const ZIP64_EOCD = 0x06064b50; // zip64 end of central directory
+
+async function inflateRaw(bytes) {
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error('This browser cannot decompress .docx files (DecompressionStream is unavailable).');
+  }
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+// Read the 64-bit values out of a zip64 extended-information extra field.
+// Fields appear in fixed order and only when their 32-bit counterpart is 0xffffffff.
+function readZip64Extra(dv, start, len, need) {
+  let p = start;
+  const end = start + len;
+  while (p + 4 <= end) {
+    const id = dv.getUint16(p, true);
+    const size = dv.getUint16(p + 2, true);
+    if (id === 0x0001) {
+      let q = p + 4;
+      const out = {};
+      for (const field of need) {
+        if (q + 8 > p + 4 + size) break;
+        out[field] = Number(dv.getBigUint64(q, true));
+        q += 8;
+      }
+      return out;
+    }
+    p += 4 + size;
+  }
+  return {};
+}
+
+// Extract a single entry from a ZIP archive as a UTF-8 string.
+async function readZipEntryText(buf, entryName) {
+  const dv = new DataView(buf);
+  const bytes = new Uint8Array(buf);
+  const dec = new TextDecoder('utf-8');
+
+  // The EOCD sits at the end, after a comment of up to 65535 bytes.
+  let eocd = -1;
+  const floor = Math.max(0, buf.byteLength - 65557);
+  for (let i = buf.byteLength - 22; i >= floor; i--) {
+    if (dv.getUint32(i, true) === ZIP_EOCD) { eocd = i; break; }
+  }
+  if (eocd === -1) throw new Error('Not a valid .docx file (no ZIP directory found).');
+
+  let cdCount  = dv.getUint16(eocd + 10, true);
+  let cdOffset = dv.getUint32(eocd + 16, true);
+
+  if (cdOffset === 0xffffffff || cdCount === 0xffff) {
+    const loc = eocd - 20;
+    if (loc >= 0 && dv.getUint32(loc, true) === ZIP64_LOC) {
+      const z64 = Number(dv.getBigUint64(loc + 8, true));
+      if (dv.getUint32(z64, true) === ZIP64_EOCD) {
+        cdCount  = Number(dv.getBigUint64(z64 + 32, true));
+        cdOffset = Number(dv.getBigUint64(z64 + 48, true));
+      }
+    }
+  }
+
+  // Walk the central directory for the entry we want.
+  let p = cdOffset;
+  let found = null;
+  for (let n = 0; n < cdCount && p + 46 <= buf.byteLength; n++) {
+    if (dv.getUint32(p, true) !== ZIP_CD) break;
+    const method    = dv.getUint16(p + 10, true);
+    const nameLen   = dv.getUint16(p + 28, true);
+    const extraLen  = dv.getUint16(p + 30, true);
+    const commentLen= dv.getUint16(p + 32, true);
+    let compSize    = dv.getUint32(p + 20, true);
+    let localOff    = dv.getUint32(p + 42, true);
+    const name = dec.decode(bytes.subarray(p + 46, p + 46 + nameLen));
+
+    if (name === entryName) {
+      if (compSize === 0xffffffff || localOff === 0xffffffff) {
+        // zip64: uncompressed size comes first, then compressed size, then offset
+        const need = ['uncompressed', 'compressed', 'offset'];
+        const z = readZip64Extra(dv, p + 46 + nameLen, extraLen, need);
+        if (z.compressed !== undefined) compSize = z.compressed;
+        if (z.offset !== undefined) localOff = z.offset;
+      }
+      found = { method, compSize, localOff };
+      break;
+    }
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+
+  if (!found) throw new Error(`Malformed .docx — ${entryName} not found in the archive.`);
+  if (dv.getUint32(found.localOff, true) !== ZIP_LOCAL) throw new Error('Malformed .docx — bad local file header.');
+
+  // The local header repeats name/extra lengths, and they may differ from the
+  // central directory's, so the data offset must be computed from the local one.
+  const lNameLen  = dv.getUint16(found.localOff + 26, true);
+  const lExtraLen = dv.getUint16(found.localOff + 28, true);
+  const dataStart = found.localOff + 30 + lNameLen + lExtraLen;
+  const raw = bytes.subarray(dataStart, dataStart + found.compSize);
+
+  if (found.method === 0) return dec.decode(raw);              // stored
+  if (found.method === 8) return dec.decode(await inflateRaw(raw)); // deflate
+  throw new Error(`Unsupported .docx compression method (${found.method}).`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DOCX — document.xml → ordered plain-text paragraphs
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Only <w:t> runs contribute text, so tracked *deletions* (<w:delText>) are
+// naturally excluded while tracked insertions are included — i.e. we read the
+// document as it would appear with all changes accepted.
+
+function docxXmlToParagraphs(xmlText) {
+  const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) {
+    throw new Error('Could not parse the Word document body (document.xml is malformed).');
+  }
+
+  const paras = [];
+  const pNodes = doc.getElementsByTagName('w:p').length
+    ? doc.getElementsByTagName('w:p')
+    : doc.getElementsByTagNameNS('*', 'p');
+
+  for (const p of Array.from(pNodes)) {
+    const text = paragraphText(p);
+    if (text) paras.push(text);
+  }
+  return paras;
+}
+
+function paragraphText(p) {
+  let out = '';
+  (function walk(node) {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType !== 1) continue;
+      switch (child.localName) {
+        case 't':       out += child.textContent; break;
+        case 'delText': break;                    // tracked deletion — omit
+        case 'tab':     out += ' '; break;
+        case 'br':
+        case 'cr':      out += ' '; break;
+        default:        walk(child);
+      }
+    }
+  })(p);
+  return out.replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+async function readDocxParagraphs(file) {
+  const xml = await readZipEntryText(await file.arrayBuffer(), 'word/document.xml');
+  return docxXmlToParagraphs(xml);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Section detection — numbered section text
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Recognised heading forms:
+//   § 50.55a Codes and standards.      → 50.55a
+//   §§ 50.55a                          → 50.55a
+//   Section 3.2.1 — Scope / Sec. 5.    → 3.2.1 / 5
+//   3.2.1 Scope   /   3.2.1. Scope     → 3.2.1
+//   1. PURPOSE                         → 1        (heading-like lines only)
+
+const SECTION_RULES = [
+  { re: /^§{1,2}\s*(\d+[A-Za-z]?(?:\.\d+[A-Za-z]*)*)\s*[.:—–-]?\s*(.*)$/ },
+  { re: /^(?:Sections?|Secs?\.)\s+(\d+(?:\.\d+)*[A-Za-z]?)\s*[.:—–-]?\s*(.*)$/i },
+  { re: /^(\d+(?:\.\d+)+[A-Za-z]?)\.?\s+(.*)$/ },
+  { re: /^(\d{1,2})\.\s+(.*)$/, singleLevel: true },
+];
+
+function detectSectionHeading(text) {
+  for (const rule of SECTION_RULES) {
+    const m = text.match(rule.re);
+    if (!m) continue;
+
+    const number = m[1].replace(/\.+$/, '');
+    const title = (m[2] || '').trim();
+
+    // Reject implausible numbering (dates, quantities like "2.5 million").
+    const parts = number.split('.');
+    if (parts.some(seg => Number(seg.replace(/[A-Za-z]/g, '')) > 999)) continue;
+
+    // A bare "1." only counts as a heading when the line reads like one.
+    if (rule.singleLevel) {
+      const words = title ? title.split(/\s+/).length : 0;
+      if (title.length > 90 || words > 14) continue;
+    }
+
+    return { key: number.toUpperCase(), number, title };
+  }
+  return null;
+}
+
+// Group a document's paragraphs into sections keyed by section number.
+// Where a number occurs more than once (a table-of-contents line plus the real
+// section, most often) the longest occurrence wins.
+function buildSections(paras) {
+  const found = [];
+  let cur = null;
+
+  for (const text of paras) {
+    const head = detectSectionHeading(text);
+    if (head) {
+      if (cur) found.push(cur);
+      cur = { key: head.key, number: head.number, title: head.title, paras: [text] };
+    } else if (cur) {
+      cur.paras.push(text);
+    }
+    // Paragraphs before the first heading (cover page, preamble) are ignored.
+  }
+  if (cur) found.push(cur);
+
+  const byKey = new Map();
+  for (const s of found) {
+    s.text = s.paras.join('\n');
+    const prev = byKey.get(s.key);
+    if (!prev || s.text.length > prev.text.length) byKey.set(s.key, s);
+  }
+  return byKey;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cross-document conflict detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Comparison key: ignores case, whitespace and smart-quote/dash styling so that
+// pure formatting differences are not reported as conflicts.
+function normForCompare(s) {
+  return s
+    .replace(/[‘’ʼ]/g, "'")
+    .replace(/[“”„]/g, '"')
+    .replace(/[‐-―]/g, '-')
+    .replace(/ /g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+// Word-overlap similarity, 0 → nothing in common, 1 → identical bag of words.
+function similarity(a, b) {
+  const ta = normForCompare(a).match(/[\w'-]+/g) || [];
+  const tb = normForCompare(b).match(/[\w'-]+/g) || [];
+  if (!ta.length && !tb.length) return 1;
+  if (!ta.length || !tb.length) return 0;
+  const counts = new Map();
+  for (const t of ta) counts.set(t, (counts.get(t) || 0) + 1);
+  let common = 0;
+  for (const t of tb) {
+    const c = counts.get(t);
+    if (c) { common++; counts.set(t, c - 1); }
+  }
+  return (2 * common) / (ta.length + tb.length);
+}
+
+// Natural ordering for section numbers: 2.9 sorts before 2.10.
+function compareSectionNumbers(a, b) {
+  const pa = a.split('.'), pb = b.split('.');
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const sa = pa[i] ?? '', sb = pb[i] ?? '';
+    const na = parseInt(sa, 10), nb = parseInt(sb, 10);
+    if (Number.isNaN(na) || Number.isNaN(nb)) {
+      if (sa !== sb) return sa < sb ? -1 : 1;
+    } else if (na !== nb) {
+      return na - nb;
+    } else if (sa !== sb) {
+      return sa < sb ? -1 : 1; // "55" vs "55a"
+    }
+  }
+  return 0;
+}
+
+// Returns { conflicts[], stats{} } for the currently loaded documents.
+function analyzeDocuments(docs) {
+  const index = new Map(); // section key → [{ doc, sec }]
+  for (const doc of docs) {
+    for (const [key, sec] of doc.sections) {
+      if (!index.has(key)) index.set(key, []);
+      index.get(key).push({ doc, sec });
+    }
+  }
+
+  const conflicts = [];
+  let uniqueToOne = 0, agreeing = 0;
+
+  for (const [key, entries] of index) {
+    if (entries.length < 2) { uniqueToOne++; continue; }
+
+    // Distinct text variants across the documents holding this section.
+    const variants = new Map(); // normalized text → [entry, …]
+    for (const e of entries) {
+      const n = normForCompare(e.sec.text);
+      if (!variants.has(n)) variants.set(n, []);
+      variants.get(n).push(e);
+    }
+    if (variants.size < 2) { agreeing++; continue; }
+
+    // Most divergent pair — used for ranking and as the default redline pair.
+    let worst = null;
+    for (let i = 0; i < entries.length; i++) {
+      for (let j = i + 1; j < entries.length; j++) {
+        if (normForCompare(entries[i].sec.text) === normForCompare(entries[j].sec.text)) continue;
+        const sim = similarity(entries[i].sec.text, entries[j].sec.text);
+        if (!worst || sim < worst.sim) worst = { a: i, b: j, sim };
+      }
+    }
+
+    const titles = new Set(entries.map(e => normForCompare(e.sec.title)).filter(Boolean));
+
+    conflicts.push({
+      key,
+      number: entries[0].sec.number,
+      title: entries.find(e => e.sec.title)?.sec.title || '',
+      entries,
+      variantCount: variants.size,
+      titlesDiffer: titles.size > 1,
+      worst: worst || { a: 0, b: 1, sim: 0 },
+    });
+  }
+
+  return {
+    conflicts,
+    stats: {
+      docs: docs.length,
+      common: index.size - uniqueToOne,
+      conflicts: conflicts.length,
+      agreeing,
+      uniqueToOne,
+    },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Redline (RLSO) — paragraph alignment then word-level diff
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Aligning at the paragraph level first keeps each word-diff small and lets
+// runs of untouched paragraphs collapse into a single "N unchanged" row.
+
+function splitParas(text) {
+  return text.split('\n').map(s => s.trim()).filter(Boolean);
+}
+
+// Longest-common-subsequence ops over two paragraph arrays.
+function lcsOps(a, b) {
+  const m = a.length, n = b.length;
+  const ka = a.map(normForCompare), kb = b.map(normForCompare);
+  const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
+  for (let i = m - 1; i >= 0; i--)
+    for (let j = n - 1; j >= 0; j--)
+      dp[i][j] = ka[i] === kb[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+
+  const ops = [];
+  let i = 0, j = 0;
+  while (i < m || j < n) {
+    if (i < m && j < n && ka[i] === kb[j]) { ops.push({ type: 'eq' }); i++; j++; }
+    else if (j < n && (i >= m || dp[i][j + 1] >= dp[i + 1][j])) { ops.push({ type: 'ins', b: b[j] }); j++; }
+    else { ops.push({ type: 'del', a: a[i] }); i++; }
+  }
+  return ops;
+}
+
+// Pair up adjacent delete/insert runs so a rewritten paragraph shows as one
+// two-column row rather than a deletion row followed by an insertion row.
+function mergeReplacements(ops) {
+  const out = [];
+  let i = 0;
+  while (i < ops.length) {
+    if (ops[i].type === 'eq') { out.push(ops[i]); i++; continue; }
+    const dels = [], ins = [];
+    while (i < ops.length && ops[i].type === 'del') dels.push(ops[i].a), i++;
+    while (i < ops.length && ops[i].type === 'ins') ins.push(ops[i].b), i++;
+    const paired = Math.min(dels.length, ins.length);
+    for (let k = 0; k < paired; k++) out.push({ type: 'rep', a: dels[k], b: ins[k] });
+    for (let k = paired; k < dels.length; k++) out.push({ type: 'del', a: dels[k] });
+    for (let k = paired; k < ins.length; k++) out.push({ type: 'ins', b: ins[k] });
+  }
+  return out;
+}
+
+function diffParagraphBlocks(aText, bText) {
+  const a = splitParas(aText), b = splitParas(bText);
+
+  // Guard the O(m·n) table; very long sections fall back to one whole-text diff.
+  if (a.length > 400 || b.length > 400) {
+    const { oldHtml, newHtml } = computeDiff(aText, bText);
+    return [{ type: 'diff', label: '', oldHtml, newHtml }];
+  }
+
+  const rows = [];
+  let eqRun = 0;
+  const flushEq = () => { if (eqRun) { rows.push({ type: 'omit', count: eqRun }); eqRun = 0; } };
+
+  for (const op of mergeReplacements(lcsOps(a, b))) {
+    if (op.type === 'eq') { eqRun++; continue; }
+    flushEq();
+    if (op.type === 'rep') {
+      const { oldHtml, newHtml } = computeDiff(op.a, op.b);
+      rows.push({ type: 'diff', label: '', oldHtml, newHtml });
+    } else if (op.type === 'del') {
+      rows.push({ type: 'diff', label: '', oldHtml: `<span class="diff-del">${esc(op.a)}</span>`, newHtml: '' });
+    } else {
+      rows.push({ type: 'diff', label: '', oldHtml: '', newHtml: `<span class="diff-add">${esc(op.b)}</span>` });
+    }
+  }
+  flushEq();
+  return rows;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Comparison view — state and rendering
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DOC_COLORS = ['#2d6a9f', '#a01a1a', '#1a7a3a', '#7a5a00', '#6a3a9f', '#0f6f77', '#a04a1a', '#4a4a6a'];
+const DOC_TAGS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+let cmpDocs = [];        // { id, tag, color, name, size, sections, error }
+let cmpSort = 'divergent';
+let cmpDocFilter = 'all';
+let cmpNextId = 0;
+
+function docTagHtml(doc, extraClass = '') {
+  return `<span class="doc-tag ${extraClass}" style="background:${doc.color}" title="${esc(doc.name)}">${doc.tag}</span>`;
+}
+
+function relabelDocs() {
+  cmpDocs.forEach((d, i) => {
+    d.tag = DOC_TAGS[i] || String(i + 1);
+    d.color = DOC_COLORS[i % DOC_COLORS.length];
+  });
+}
+
+async function addComparisonFiles(fileList) {
+  const files = Array.from(fileList).filter(f => /\.docx$/i.test(f.name));
+  const skipped = Array.from(fileList).length - files.length;
+
+  if (!files.length) {
+    setStatusIn('cmpStatusBar', '⚠️', 'No .docx files found',
+      'This comparison reads Word .docx files only. Legacy .doc and .pdf are not supported.');
+    return;
+  }
+
+  for (const file of files) {
+    if (cmpDocs.some(d => d.name === file.name && d.size === file.size)) continue;
+
+    setStatusIn('cmpStatusBar', '⏳', 'Reading documents…', file.name);
+    const doc = { id: cmpNextId++, name: file.name, size: file.size, sections: new Map(), error: null };
+    try {
+      doc.sections = buildSections(await readDocxParagraphs(file));
+    } catch (err) {
+      doc.error = err.message;
+    }
+    cmpDocs.push(doc);
+  }
+
+  relabelDocs();
+  renderComparison(skipped);
+}
+
+function removeComparisonDoc(id) {
+  cmpDocs = cmpDocs.filter(d => d.id !== id);
+  relabelDocs();
+  renderComparison();
+}
+
+function renderFileChips() {
+  const box = document.getElementById('cmpFileChips');
+  box.innerHTML = '';
+  if (!cmpDocs.length) return;
+
+  for (const doc of cmpDocs) {
+    const chip = document.createElement('div');
+    chip.className = 'file-chip' + (doc.error ? ' error' : '');
+    const meta = doc.error
+      ? `<span class="file-chip-meta" style="color:var(--del)">${esc(doc.error)}</span>`
+      : `<span class="file-chip-meta">${doc.sections.size} section${doc.sections.size !== 1 ? 's' : ''}</span>`;
+    chip.innerHTML = `${docTagHtml(doc)}<span class="file-chip-name">${esc(doc.name)}</span>${meta}
+      <button class="file-chip-remove" type="button" title="Remove">✕</button>`;
+    chip.querySelector('.file-chip-remove').addEventListener('click', () => removeComparisonDoc(doc.id));
+    box.appendChild(chip);
+  }
+
+  const clear = document.createElement('button');
+  clear.className = 'chip-clear';
+  clear.type = 'button';
+  clear.textContent = 'Clear all';
+  clear.addEventListener('click', () => { cmpDocs = []; renderComparison(); });
+  box.appendChild(clear);
+}
+
+function renderComparison(skipped = 0) {
+  renderFileChips();
+  const out = document.getElementById('cmpResults');
+  out.innerHTML = '';
+
+  const usable = cmpDocs.filter(d => !d.error);
+  const skipNote = skipped ? ` ${skipped} non-.docx file${skipped !== 1 ? 's were' : ' was'} ignored.` : '';
+
+  if (usable.length < 2) {
+    setStatusIn('cmpStatusBar', usable.length ? '📄' : '⏳',
+      usable.length ? 'Add at least one more document' : 'No documents loaded',
+      `${usable.length} document${usable.length !== 1 ? 's' : ''} ready — comparison needs two or more.${skipNote}`,
+      cmpDocs.length > 0);
+    if (usable.length) {
+      out.innerHTML = `<div class="empty-state"><div class="icon">📚</div>Add a second .docx file to compare against.</div>`;
+    }
+    return;
+  }
+
+  const { conflicts, stats } = analyzeDocuments(usable);
+
+  setStatusIn('cmpStatusBar', conflicts.length ? '⚠️' : '✅',
+    conflicts.length
+      ? `${conflicts.length} conflicting section${conflicts.length !== 1 ? 's' : ''} found`
+      : 'No conflicting sections found',
+    conflicts.length
+      ? `Across ${stats.docs} documents · click a section to open its redline.${skipNote}`
+      : `All ${stats.common} shared section${stats.common !== 1 ? 's' : ''} match across the documents.${skipNote}`);
+
+  // ── summary strip ──
+  const sum = document.createElement('div');
+  sum.className = 'cmp-summary';
+  sum.innerHTML = `
+    <div class="cmp-stat"><span class="n">${stats.docs}</span><span class="k">Documents</span></div>
+    <div class="cmp-stat"><span class="n">${stats.common}</span><span class="k">Shared sections</span></div>
+    <div class="cmp-stat"><span class="n${stats.conflicts ? ' flag' : ''}">${stats.conflicts}</span><span class="k">Conflicts</span></div>
+    <div class="cmp-stat"><span class="n">${stats.agreeing}</span><span class="k">In agreement</span></div>
+    <div class="cmp-stat"><span class="n">${stats.uniqueToOne}</span><span class="k">In one doc only</span></div>`;
+  out.appendChild(sum);
+
+  if (!conflicts.length) {
+    out.innerHTML += stats.common
+      ? `<div class="empty-state"><div class="icon">✅</div>No conflicts detected.<br>Every section number shared by these documents has matching text.</div>`
+      : `<div class="empty-state"><div class="icon">🔍</div>No section number appears in more than one document.<br>Check that the documents use numbered sections such as <code>3.2.1</code> or <code>§ 50.55a</code>.</div>`;
+    return;
+  }
+
+  // ── filter / sort bar ──
+  const bar = document.createElement('div');
+  bar.className = 'filter-bar';
+  bar.innerHTML = `<span class="filter-label">Involving</span>`;
+
+  const mkPill = (label, group, value, active) => {
+    const b = document.createElement('button');
+    b.className = 'filter-pill' + (active ? ' active' : '');
+    b.textContent = label;
+    b.dataset.group = group;
+    b.dataset.value = value;
+    return b;
+  };
+
+  bar.appendChild(mkPill(`All (${conflicts.length})`, 'doc', 'all', cmpDocFilter === 'all'));
+  for (const doc of usable) {
+    const n = conflicts.filter(c => c.entries.some(e => e.doc.id === doc.id)).length;
+    bar.appendChild(mkPill(`${doc.tag} · ${n}`, 'doc', String(doc.id), cmpDocFilter === String(doc.id)));
+  }
+
+  const sortLabel = document.createElement('span');
+  sortLabel.className = 'filter-label';
+  sortLabel.style.marginLeft = '0.75rem';
+  sortLabel.textContent = 'Sort';
+  bar.appendChild(sortLabel);
+  bar.appendChild(mkPill('Most divergent', 'sort', 'divergent', cmpSort === 'divergent'));
+  bar.appendChild(mkPill('Section order', 'sort', 'number', cmpSort === 'number'));
+
+  bar.addEventListener('click', e => {
+    const pill = e.target.closest('.filter-pill');
+    if (!pill) return;
+    if (pill.dataset.group === 'sort') cmpSort = pill.dataset.value;
+    else cmpDocFilter = pill.dataset.value;
+    renderComparison();
+  });
+  out.appendChild(bar);
+
+  // ── conflict cards ──
+  conflicts.sort((a, b) => cmpSort === 'number'
+    ? compareSectionNumbers(a.number, b.number)
+    : a.worst.sim - b.worst.sim);
+
+  const hdr = document.createElement('div');
+  hdr.className = 'amendments-header';
+  hdr.innerHTML = `<h2>Conflicting Sections</h2><span class="badge">${conflicts.length} found</span>`;
+  out.appendChild(hdr);
+
+  const list = document.createElement('div');
+  list.className = 'amendment-cards';
+  out.appendChild(list);
+
+  for (const c of conflicts) {
+    if (cmpDocFilter !== 'all' && !c.entries.some(e => String(e.doc.id) === cmpDocFilter)) continue;
+    list.appendChild(buildConflictCard(c, usable));
+  }
+}
+
+function buildConflictCard(conflict, allDocs) {
+  const card = document.createElement('div');
+  card.className = 'conflict-card';
+
+  const present = new Set(conflict.entries.map(e => e.doc.id));
+  const tags = allDocs.map(d => docTagHtml(d, present.has(d.id) ? '' : 'absent')).join('');
+  const pct = Math.round(conflict.worst.sim * 100);
+
+  const variantBadge = conflict.variantCount > 2
+    ? `<span class="sec-badge variants">${conflict.variantCount} variants</span>` : '';
+  const titleBadge = conflict.titlesDiffer
+    ? `<span class="sec-badge titles">heading differs</span>` : '';
+
+  card.innerHTML = `
+    <div class="conflict-card-header">
+      <span class="sec-num">${esc(conflict.number)}</span>
+      <span class="sec-title${conflict.title ? '' : ' untitled'}">${esc(conflict.title || 'untitled section')}</span>
+      ${variantBadge}${titleBadge}
+      <span class="sec-badge sim">${pct}% alike</span>
+      <span class="sec-docs">${tags}</span>
+      <span class="amend-toggle">▼</span>
+    </div>
+    <div class="conflict-body">
+      <div class="pair-picker">
+        <span>Redline</span>
+        <select class="pick-a"></select>
+        <span class="vs">vs</span>
+        <select class="pick-b"></select>
+        <span class="pair-note"></span>
+      </div>
+      <div class="redline-area"></div>
+    </div>`;
+
+  const selA = card.querySelector('.pick-a');
+  const selB = card.querySelector('.pick-b');
+  for (const sel of [selA, selB]) {
+    sel.innerHTML = conflict.entries
+      .map((e, i) => `<option value="${i}">${esc(e.doc.tag + ' · ' + trunc(e.doc.name, 40))}</option>`)
+      .join('');
+  }
+  selA.value = String(conflict.worst.a);
+  selB.value = String(conflict.worst.b);
+
+  const area = card.querySelector('.redline-area');
+  const note = card.querySelector('.pair-note');
+
+  function draw() {
+    const a = conflict.entries[Number(selA.value)];
+    const b = conflict.entries[Number(selB.value)];
+
+    if (a === b) {
+      note.className = 'pair-note';
+      area.innerHTML = `<div class="docx-note">Pick two different documents to see a redline.</div>`;
+      return;
+    }
+    if (normForCompare(a.sec.text) === normForCompare(b.sec.text)) {
+      note.className = 'pair-note same';
+      note.textContent = 'These two agree';
+      area.innerHTML = `<div class="docx-note">✅ ${esc(a.doc.tag)} and ${esc(b.doc.tag)} carry identical text for this section — the conflict is with another document.</div>`;
+      return;
+    }
+
+    note.className = 'pair-note';
+    note.textContent = `${Math.round(similarity(a.sec.text, b.sec.text) * 100)}% alike`;
+    area.innerHTML = renderDiffRows(
+      diffParagraphBlocks(a.sec.text, b.sec.text),
+      `${a.doc.tag} — ${trunc(a.doc.name, 46)}`,
+      `${b.doc.tag} — ${trunc(b.doc.name, 46)}`
+    );
+  }
+
+  selA.addEventListener('change', draw);
+  selB.addEventListener('change', draw);
+  card.querySelector('.pair-picker').addEventListener('click', e => e.stopPropagation());
+
+  let drawn = false;
+  card.querySelector('.conflict-card-header').addEventListener('click', () => {
+    const wasOpen = card.classList.contains('open');
+    card.classList.toggle('open');
+    if (!wasOpen && !drawn) { drawn = true; draw(); }
+  });
+
+  return card;
+}
+
+// ── comparison view wiring ──
+
+document.getElementById('cmpFileInput').addEventListener('change', e => {
+  addComparisonFiles(e.target.files);
+  e.target.value = ''; // allow re-adding the same file after removal
+});
+
+const cua = document.getElementById('cmpUploadArea');
+cua.addEventListener('dragover', e => { e.preventDefault(); cua.classList.add('drag-over'); });
+cua.addEventListener('dragleave', () => cua.classList.remove('drag-over'));
+cua.addEventListener('drop', e => {
+  e.preventDefault(); cua.classList.remove('drag-over');
+  addComparisonFiles(e.dataTransfer.files);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Top-level navigation
+// ═════════════════════════════════════════════════════════════════════════════
+
+const TAGLINES = {
+  ecfr: 'Federal Register proposed rules vs. current eCFR text',
+  compare: 'Cross-document section conflicts across multiple .docx files',
+};
+
+function switchView(view) {
+  if (!TAGLINES[view]) view = 'ecfr';
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === `view-${view}`));
+  document.querySelectorAll('.footer-note').forEach(f => f.classList.toggle('active', f.dataset.view === view));
+  document.getElementById('tagline').textContent = TAGLINES[view];
+}
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    switchView(tab.dataset.view);
+    history.replaceState(null, '', `#${tab.dataset.view}`);
+  });
+});
+
+switchView(location.hash.replace('#', '') || 'ecfr');
 </script>
 </body>
 </html>
