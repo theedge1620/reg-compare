@@ -186,6 +186,46 @@
 
   .docx-note { padding: 0.75rem 1.25rem; font-family: sans-serif; font-size: 0.8rem; color: var(--ink-muted); background: var(--omit-bg); }
 
+  /* ═══ Folder Comparison view ═════════════════════════════════════════════ */
+  #fldResults { display: flex; flex-direction: column; gap: 1rem; }
+  #fldResults:empty { display: none; }
+  .upload-area code, .fld-howto code, .fld-meta code { font-family: var(--mono); font-size: 0.78rem; background: var(--omit-bg); padding: 0.05rem 0.3rem; border-radius: 3px; }
+
+  .fld-howto { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 1.1rem; font-family: sans-serif; font-size: 0.82rem; color: var(--ink-muted); }
+  .fld-howto summary { cursor: pointer; font-weight: 600; color: var(--ink); }
+  .fld-howto ol { margin: 0.6rem 0 0 1.2rem; display: flex; flex-direction: column; gap: 0.45rem; line-height: 1.5; }
+  .fld-howto pre { font-family: var(--mono); font-size: 0.78rem; background: var(--ink); color: #e8e8f0; padding: 0.55rem 0.8rem; border-radius: 4px; margin: 0.35rem 0; overflow-x: auto; }
+
+  .fld-meta { display: flex; flex-wrap: wrap; gap: 0.3rem 1.5rem; font-family: sans-serif; font-size: 0.78rem; color: var(--ink-muted); }
+  .fld-meta code { word-break: break-all; }
+
+  .fld-docs { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); font-family: sans-serif; font-size: 0.8rem; }
+  .fld-docs summary { cursor: pointer; padding: 0.65rem 1.1rem; font-weight: 600; color: var(--ink); }
+  .fld-docs summary .warn { color: var(--del); font-weight: 400; margin-left: 0.5rem; }
+  .fld-table-wrap { overflow: auto; max-height: 22rem; border-top: 1px solid var(--border); }
+  .fld-docs table { width: 100%; border-collapse: collapse; }
+  .fld-docs th { text-align: left; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-faint); padding: 0.4rem 0.8rem; background: var(--paper); position: sticky; top: 0; white-space: nowrap; }
+  .fld-docs td { padding: 0.35rem 0.8rem; border-top: 1px solid var(--border); color: var(--ink); vertical-align: top; }
+  .fld-docs td.num { text-align: right; font-family: var(--mono); font-size: 0.75rem; white-space: nowrap; }
+  .fld-docs td.path { min-width: 14rem; overflow-wrap: anywhere; }
+  .fld-docs tr.error td[colspan] { min-width: 16rem; }
+  .fld-docs tr.error td { color: var(--del); background: var(--del-bg); }
+
+  .fld-search { flex: 1 1 14rem; min-width: 10rem; font-family: sans-serif; font-size: 0.8rem; padding: 0.3rem 0.7rem; border: 1.5px solid var(--border); border-radius: 999px; color: var(--ink); background: var(--white); }
+  .fld-select { font-family: sans-serif; font-size: 0.78rem; padding: 0.25rem 0.4rem; border: 1.5px solid var(--border); border-radius: 4px; background: var(--white); color: var(--ink); max-width: 16rem; }
+  .fld-search:focus, .fld-select:focus { outline: none; border-color: var(--accent); }
+
+  .variant-legend { padding: 0.55rem 1.25rem; border-bottom: 1px solid var(--border); font-family: sans-serif; font-size: 0.78rem; display: flex; flex-direction: column; gap: 0.3rem; }
+  .variant-row { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+  .variant-row .doc-tag { width: 1.1rem; height: 1.1rem; font-size: 0.65rem; }
+  .variant-id { font-family: var(--mono); font-weight: 700; color: var(--ink); min-width: 1.8rem; }
+  .variant-kind { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-faint); min-width: 5.8rem; }
+  .variant-names { color: var(--ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+  .sec-more { font-family: sans-serif; font-size: 0.68rem; color: var(--ink-faint); align-self: center; margin-left: 0.15rem; }
+
+  .show-more { align-self: center; font-family: sans-serif; font-size: 0.8rem; padding: 0.45rem 1.1rem; border: 1px solid var(--border); border-radius: 999px; background: var(--white); color: var(--accent); cursor: pointer; }
+  .show-more:hover { border-color: var(--accent); }
+
   footer { text-align: center; font-family: sans-serif; font-size: 0.75rem; color: var(--ink-faint); padding: 1.5rem 2rem; border-top: 1px solid var(--border); }
   footer a { color: var(--accent); text-decoration: none; }
   footer code { background: #eee; padding: 0.05rem 0.3rem; border-radius: 3px; }
@@ -211,6 +251,7 @@
   <nav class="tabs">
     <button class="tab active" data-view="ecfr" type="button">eCFR Analysis</button>
     <button class="tab" data-view="compare" type="button">Document Comparison</button>
+    <button class="tab" data-view="folder" type="button">Folder Comparison</button>
   </nav>
 </header>
 
@@ -258,6 +299,39 @@
     <div id="cmpResults"></div>
   </section>
 
+  <!-- ═══ VIEW 3 — Folder comparison dataset from folder_compare.py ═══════ -->
+  <section class="view" id="view-folder">
+    <div class="upload-area" id="fldUploadArea">
+      <input type="file" id="fldFileInput" accept=".json,application/json" />
+      <div class="upload-icon">🗂️</div>
+      <h2>Drop a folder-comparison dataset here</h2>
+      <p>Load the <code>regdiff-folder.json</code> written by <code>folder_compare.py</code></p>
+    </div>
+
+    <details class="fld-howto" id="fldHowto" open>
+      <summary>How to build the dataset</summary>
+      <ol>
+        <li>Put the <code>.docx</code> amendment documents to compare in one folder.</li>
+        <li>Run the analyzer (it sits next to this page):
+          <pre>python folder_compare.py "C:\path\to\folder"</pre>
+          Add <code>--recursive</code> to include subfolders, or <code>-o</code> to choose where the results go.
+        </li>
+        <li>It writes <code>regdiff-folder.json</code> (load it here), <code>regdiff-folder.csv</code>, and —
+          when <code>openpyxl</code> is installed — <code>regdiff-folder.xlsx</code> with real strikethrough redlines.</li>
+      </ol>
+    </details>
+
+    <div class="status-bar" id="fldStatusBar">
+      <div class="status-icon">⏳</div>
+      <div class="status-text">
+        <strong class="status-title">Reading dataset…</strong>
+        <span class="status-detail"></span>
+      </div>
+    </div>
+
+    <div id="fldResults"></div>
+  </section>
+
 </main>
 
 <footer>
@@ -276,6 +350,13 @@
     the instruction itself is compared, against other instructions only.
     Comparison ignores case, whitespace and smart-quote/dash styling; the redline is verbatim.
     Files are read entirely in your browser — nothing is uploaded.
+  </div>
+  <div class="footer-note" data-view="folder">
+    <code>folder_compare.py</code> applies the same parsing, section-scoped matching and redline logic as Document
+    Comparison to every <code>.docx</code> in a folder. A subsection is listed when two or more documents carry it with
+    differing text; documents that share identical text are grouped into one variant, and each pair of variants is
+    redlined. Text-vs-instruction differences are shown side by side, never redlined.
+    The dataset is read entirely in your browser — nothing is uploaded.
   </div>
 </footer>
 
@@ -2341,12 +2422,409 @@ cua.addEventListener('drop', e => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// VIEW 3 — Folder comparison (dataset produced by folder_compare.py)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// folder_compare.py runs the Document Comparison logic over every .docx in a
+// folder and writes a JSON dataset. This view only displays it. Documents that
+// share identical text are grouped into variants; each same-kind variant pair
+// arrives with a precomputed redline as rows of [op, text] runs:
+//   { t: 'omit', n }                  — n unchanged paragraphs
+//   { t: 'diff', ops: [[op, text]] }  — op "=" unchanged, "-" deleted, "+" inserted
+
+const FLD_SCHEMA = 'regdiff-folder/1';
+const FLD_PAGE = 50;
+
+let fld = null;
+let fldView = null;
+
+function fldResetView() {
+  fldView = { q: '', doc: 'all', type: 'all', sort: 'number', shown: FLD_PAGE };
+}
+
+async function loadFolderDataset(file) {
+  if (!file) return;
+  setStatusIn('fldStatusBar', '⏳', 'Reading dataset…', file.name);
+
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch (e) {
+    setStatusIn('fldStatusBar', '⚠️', 'Not a readable dataset', `${file.name} is not valid JSON.`);
+    return;
+  }
+  if (!data || data.schema !== FLD_SCHEMA || !Array.isArray(data.conflicts) || !Array.isArray(data.documents)) {
+    setStatusIn('fldStatusBar', '⚠️', 'Not a folder-comparison dataset',
+      `${file.name} was not written by folder_compare.py (expected schema "${FLD_SCHEMA}").`);
+    return;
+  }
+
+  for (const d of data.documents) d.color = DOC_COLORS[d.id % DOC_COLORS.length];
+  data.docById = new Map(data.documents.map(d => [d.id, d]));
+  data.fileName = file.name;
+  fld = data;
+  fldResetView();
+  document.getElementById('fldHowto').open = false;
+  renderFolder();
+}
+
+function fldFmtDate(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? String(iso || '') : d.toLocaleString();
+}
+
+// Variant label: "V2 — A, C, F" (plus a marker when it is instruction prose).
+function fldVariantLabel(c, vi) {
+  const v = c.variants[vi];
+  const tags = v.docs.map(id => fld.docById.get(id)?.tag ?? '?');
+  const who = tags.length <= 5 ? tags.join(', ') : `${tags.slice(0, 4).join(', ')} +${tags.length - 4}`;
+  return `V${vi + 1} — ${who}${v.kind === 'instruction' ? ' (instruction)' : ''}`;
+}
+
+// Precomputed rows → the { oldHtml, newHtml } rows renderDiffRows() draws.
+// Viewing a pair in the opposite direction swaps the sides: what one variant
+// deleted, the other inserted.
+function fldRowsToDiffRows(rows, reversed) {
+  return rows.map(r => {
+    if (r.t === 'omit') return { type: 'omit', count: r.n };
+    let oldHtml = '', newHtml = '';
+    for (const [raw, text] of r.ops) {
+      const op = !reversed ? raw : raw === '-' ? '+' : raw === '+' ? '-' : raw;
+      if (op === '=') { oldHtml += esc(text); newHtml += esc(text); }
+      else if (op === '-') oldHtml += `<span class="diff-del">${esc(text)}</span>`;
+      else newHtml += `<span class="diff-add">${esc(text)}</span>`;
+    }
+    return { type: 'diff', label: '', oldHtml, newHtml };
+  });
+}
+
+function fldSearchBlob(c) {
+  if (c._blob === undefined) {
+    c._blob = [
+      `§ ${c.section}${c.path}`, `${c.section}${c.path}`, c.title || '',
+      ...c.variants.map(v => v.text), ...c.instructions.map(i => i.text),
+    ].join('\n').toLowerCase();
+  }
+  return c._blob;
+}
+
+function fldMatches(c) {
+  if (fldView.doc !== 'all' && !c.docs.includes(Number(fldView.doc))) return false;
+  const pairKinds = new Set(c.pairs.map(p => c.variants[p.a].kind));
+  switch (fldView.type) {
+    case 'text':        if (!pairKinds.has('text')) return false; break;
+    case 'instruction': if (!pairKinds.has('instruction')) return false; break;
+    case 'form':        if (!c.formsDiffer) return false; break;
+    case 'multi':       if (c.variantCount < 3) return false; break;
+  }
+  return !fldView.q || fldSearchBlob(c).includes(fldView.q);
+}
+
+function renderFolder() {
+  const out = document.getElementById('fldResults');
+  out.innerHTML = '';
+  const s = fld.stats;
+  const pl = (n, w) => `${n} ${w}${n !== 1 ? 's' : ''}`;
+
+  setStatusIn('fldStatusBar', s.conflicts ? '⚠️' : '✅',
+    s.conflicts
+      ? `${pl(s.conflicts, 'conflicting subsection')} in ${pl(s.sectionsAffected, 'section')}`
+      : 'No conflicting subsections',
+    `${s.readable} of ${pl(s.documents, 'document')} readable`
+      + (s.failed ? ` · ${s.failed} could not be read` : '')
+      + ` · generated ${fldFmtDate(fld.generatedAt)}`
+      + (s.readable < 2 ? ' · fewer than two readable documents, so nothing was compared' : ''));
+
+  // ── source ──
+  const meta = document.createElement('div');
+  meta.className = 'fld-meta';
+  meta.innerHTML = `<span>📁 <code>${esc(fld.folder || '')}</code>${fld.recursive ? ' · including subfolders' : ''}</span>
+    <span>Dataset: ${esc(fld.fileName)}</span>`;
+  out.appendChild(meta);
+
+  // ── summary strip ──
+  const sum = document.createElement('div');
+  sum.className = 'cmp-summary';
+  sum.innerHTML = `
+    <div class="cmp-stat"><span class="n">${s.documents}</span><span class="k">Documents</span></div>
+    ${s.failed ? `<div class="cmp-stat"><span class="n flag">${s.failed}</span><span class="k">Unreadable</span></div>` : ''}
+    <div class="cmp-stat"><span class="n">${s.shared}</span><span class="k">Shared subsections</span></div>
+    <div class="cmp-stat"><span class="n${s.conflicts ? ' flag' : ''}">${s.conflicts}</span><span class="k">Conflicts</span></div>
+    <div class="cmp-stat"><span class="n">${s.sectionsAffected}</span><span class="k">Sections affected</span></div>
+    <div class="cmp-stat"><span class="n">${s.agreeing}</span><span class="k">In agreement</span></div>
+    <div class="cmp-stat"><span class="n">${s.formOnly}</span><span class="k">Form differs only</span></div>`;
+  out.appendChild(sum);
+
+  // ── documents ──
+  const docs = document.createElement('details');
+  docs.className = 'fld-docs';
+  docs.open = fld.documents.length <= 8;
+  const num = v => (v === null || v === undefined) ? '' : v;
+  docs.innerHTML = `
+    <summary>Documents (${fld.documents.length})${s.failed ? `<span class="warn">${pl(s.failed, 'file')} could not be read</span>` : ''}</summary>
+    <div class="fld-table-wrap"><table>
+      <thead><tr><th></th><th>File</th><th>Subsections</th><th>Sections</th><th>Instructions</th><th>Instruction-only</th><th>Conflicts</th></tr></thead>
+      <tbody>${fld.documents.map(d => d.error
+        ? `<tr class="error"><td>${docTagHtml(d)}</td><td class="path">${esc(d.relPath || d.name)}</td><td colspan="5">⚠ ${esc(d.error)}</td></tr>`
+        : `<tr><td>${docTagHtml(d)}</td><td class="path">${esc(d.relPath || d.name)}</td>
+             <td class="num">${num(d.units)}</td><td class="num">${num(d.sections)}</td><td class="num">${num(d.instructions)}</td>
+             <td class="num">${num(d.instructionOnly)}</td><td class="num">${num(d.conflicts)}</td></tr>`).join('')}
+      </tbody></table></div>`;
+  out.appendChild(docs);
+
+  if (!s.conflicts) {
+    out.insertAdjacentHTML('beforeend', s.shared
+      ? `<div class="empty-state"><div class="icon">✅</div>No conflicts detected.<br>Every subsection shared by these documents has matching text.</div>`
+      : `<div class="empty-state"><div class="icon">🔍</div>No subsection appears in more than one document.</div>`);
+    return;
+  }
+
+  // ── filters ──
+  const bar = document.createElement('div');
+  bar.className = 'filter-bar';
+  bar.innerHTML = `
+    <input type="search" class="fld-search" placeholder="Search § number, heading or text…" aria-label="Search conflicts">
+    <select class="fld-select" data-f="doc" aria-label="Filter by document">
+      <option value="all">All documents</option>
+      ${fld.documents.filter(d => !d.error && d.conflicts).map(d =>
+        `<option value="${d.id}">${esc(d.tag + ' · ' + trunc(d.name, 32))} (${d.conflicts})</option>`).join('')}
+    </select>
+    <select class="fld-select" data-f="type" aria-label="Filter by conflict type">
+      <option value="all">All conflict types</option>
+      <option value="text">Text vs. text</option>
+      <option value="instruction">Instruction vs. instruction</option>
+      <option value="form">Form differs</option>
+      <option value="multi">3 or more variants</option>
+    </select>
+    <span class="filter-label" style="margin-left:0.5rem">Sort</span>
+    <button class="filter-pill active" data-sort="number" type="button">Section order</button>
+    <button class="filter-pill" data-sort="divergent" type="button">Most divergent</button>
+    <span class="filter-count" id="fldCount"></span>`;
+  out.appendChild(bar);
+
+  let timer = null;
+  bar.querySelector('.fld-search').addEventListener('input', e => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      fldView.q = e.target.value.replace(/§/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+      fldView.shown = FLD_PAGE;
+      renderFolderList();
+    }, 150);
+  });
+  bar.querySelectorAll('.fld-select').forEach(sel => sel.addEventListener('change', () => {
+    fldView[sel.dataset.f] = sel.value;
+    fldView.shown = FLD_PAGE;
+    renderFolderList();
+  }));
+  bar.querySelectorAll('[data-sort]').forEach(btn => btn.addEventListener('click', () => {
+    fldView.sort = btn.dataset.sort;
+    bar.querySelectorAll('[data-sort]').forEach(b => b.classList.toggle('active', b === btn));
+    renderFolderList();
+  }));
+
+  const hdr = document.createElement('div');
+  hdr.className = 'amendments-header';
+  hdr.innerHTML = `<h2>Conflicting Subsections</h2><span class="badge">${s.conflicts} found</span>`;
+  out.appendChild(hdr);
+
+  const list = document.createElement('div');
+  list.className = 'amendment-cards';
+  list.id = 'fldList';
+  out.appendChild(list);
+
+  const more = document.createElement('button');
+  more.className = 'show-more';
+  more.id = 'fldMore';
+  more.type = 'button';
+  more.addEventListener('click', () => { fldView.shown += FLD_PAGE; renderFolderList(); });
+  out.appendChild(more);
+
+  renderFolderList();
+}
+
+function renderFolderList() {
+  let items = fld.conflicts.filter(fldMatches);
+  if (fldView.sort === 'divergent') {
+    // Form-only conflicts carry no similarity; rank them with the near-identical.
+    items = items.slice().sort((a, b) =>
+      ((a.minSimilarity ?? 1) - (b.minSimilarity ?? 1)) || (a.id - b.id));
+  }
+
+  const filtered = items.length !== fld.conflicts.length;
+  document.getElementById('fldCount').textContent = filtered
+    ? `${items.length} of ${fld.conflicts.length} shown` : '';
+
+  const list = document.getElementById('fldList');
+  list.innerHTML = '';
+  if (!items.length) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">🔍</div>No conflicts match these filters.</div>`;
+  }
+  for (const c of items.slice(0, fldView.shown)) list.appendChild(buildFolderCard(c));
+
+  const more = document.getElementById('fldMore');
+  const remaining = items.length - fldView.shown;
+  more.hidden = remaining <= 0;
+  more.textContent = `Show ${Math.min(FLD_PAGE, remaining)} more · ${remaining} remaining`;
+}
+
+function buildFolderCard(c) {
+  const card = document.createElement('div');
+  card.className = 'conflict-card';
+
+  // Presence strip: every document when the folder is small, else only holders.
+  const present = new Set(c.docs);
+  let tags;
+  if (fld.documents.length <= 12) {
+    tags = fld.documents.map(d => docTagHtml(d, present.has(d.id) ? '' : 'absent')).join('');
+  } else {
+    const ids = [...present];
+    tags = ids.slice(0, 8).map(id => docTagHtml(fld.docById.get(id))).join('')
+      + (ids.length > 8 ? `<span class="sec-more">+${ids.length - 8}</span>` : '');
+  }
+
+  const badges =
+    (c.variantCount > 2 ? `<span class="sec-badge variants">${c.variantCount} variants</span>` : '')
+    + (c.hasElision ? `<span class="sec-badge elision" title="Unchanged text elided with * * *">* * *</span>` : '')
+    + (c.formsDiffer ? `<span class="sec-badge forms" title="One document sets out the text, another gives only the amendment instruction">${c.formOnly ? 'form differs' : 'mixed form'}</span>` : '');
+  const sim = c.formOnly ? '—' : `${Math.round(c.minSimilarity * 100)}% alike`;
+
+  const instrHtml = c.instructions.length ? `
+    <div class="instr-block">
+      <div class="instr-head">Amendment instructions affecting § ${esc(c.section)}</div>
+      ${c.instructions.map(i => `
+        <div class="instr-line">
+          ${docTagHtml(fld.docById.get(i.doc))}
+          <span class="instr-num">${esc(i.num)}.</span>
+          <span class="instr-text">${esc(i.text.replace(INSTRUCTION_RE, '$2'))}</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  const legend = `
+    <div class="variant-legend">
+      ${c.variants.map((v, vi) => `
+        <div class="variant-row">
+          <span class="variant-id">V${vi + 1}</span>
+          <span class="variant-kind">${v.kind === 'instruction' ? 'instruction' : 'amendatory text'}</span>
+          <span class="sec-docs">${v.docs.slice(0, 10).map(id => docTagHtml(fld.docById.get(id))).join('')}</span>
+          <span class="variant-names">${esc(v.docs.map(id => fld.docById.get(id)?.name ?? '').join(' · '))}</span>
+        </div>`).join('')}
+    </div>`;
+
+  card.innerHTML = `
+    <div class="conflict-card-header">
+      <span class="sec-num">§ ${esc(c.section)}</span>
+      <span class="sec-path">${esc(c.path || 'section body')}</span>
+      <span class="sec-title${c.title ? '' : ' untitled'}">${esc(c.title || '')}</span>
+      ${badges}
+      <span class="sec-badge sim">${sim}</span>
+      <span class="sec-docs">${tags}</span>
+      <span class="amend-toggle">▼</span>
+    </div>
+    <div class="conflict-body">
+      ${instrHtml}
+      ${legend}
+      <div class="pair-picker">
+        <span>Redline</span>
+        <select class="pick-a" aria-label="Left variant"></select>
+        <span class="vs">vs</span>
+        <select class="pick-b" aria-label="Right variant"></select>
+        <span class="pair-note"></span>
+      </div>
+      <div class="redline-area"></div>
+    </div>`;
+
+  const selA = card.querySelector('.pick-a');
+  const selB = card.querySelector('.pick-b');
+  const options = c.variants.map((_, vi) => `<option value="${vi}">${esc(fldVariantLabel(c, vi))}</option>`).join('');
+  selA.innerHTML = options;
+  selB.innerHTML = options;
+  selA.value = String(c.defaultPair[0]);
+  selB.value = String(c.defaultPair[1]);
+
+  const area = card.querySelector('.redline-area');
+  const note = card.querySelector('.pair-note');
+
+  function draw() {
+    const ia = Number(selA.value), ib = Number(selB.value);
+    const va = c.variants[ia], vb = c.variants[ib];
+    note.className = 'pair-note';
+    note.textContent = '';
+
+    if (ia === ib) {
+      area.innerHTML = `<div class="docx-note">Pick two different variants to see a redline.</div>`;
+      return;
+    }
+
+    if (va.kind !== vb.kind) {
+      const txt = va.kind === 'text' ? ia : ib;
+      const ins = va.kind === 'text' ? ib : ia;
+      note.textContent = 'different forms';
+      area.innerHTML = `
+        <div class="docx-note">⚠ These variants express the subsection differently, so they are shown side by side rather than redlined.
+        <strong>V${txt + 1}</strong> sets out the amendatory text; <strong>V${ins + 1}</strong> gives only the amendment instruction.</div>
+        ${renderDiffRows(
+          [{ type: 'diff', label: '', oldHtml: esc(c.variants[txt].text), newHtml: esc(c.variants[ins].text) }],
+          `${fldVariantLabel(c, txt)} · amendatory text`,
+          `${fldVariantLabel(c, ins)}`)}`;
+      return;
+    }
+
+    const pair = c.pairs.find(p => (p.a === ia && p.b === ib) || (p.a === ib && p.b === ia));
+    if (!pair) {
+      area.innerHTML = `<div class="ecfr-error">⚠ The dataset has no redline for this pair.</div>`;
+      return;
+    }
+    note.textContent = `${Math.round(pair.similarity * 100)}% alike`;
+
+    const notes =
+      ((va.hasElision || vb.hasElision)
+        ? `<div class="docx-note">⋯ This subsection carries a <code>* * *</code> elision — text not reprinted is unchanged and is not compared.</div>` : '')
+      + (pair.rows.some(r => r.coarse)
+        ? `<div class="docx-note">This passage is too long for a word-level redline, so it is marked as a whole.</div>` : '');
+
+    area.innerHTML = notes + renderDiffRows(
+      fldRowsToDiffRows(pair.rows, pair.a !== ia),
+      fldVariantLabel(c, ia),
+      fldVariantLabel(c, ib));
+  }
+
+  selA.addEventListener('change', draw);
+  selB.addEventListener('change', draw);
+  card.querySelector('.pair-picker').addEventListener('click', e => e.stopPropagation());
+
+  let drawn = false;
+  card.querySelector('.conflict-card-header').addEventListener('click', () => {
+    const wasOpen = card.classList.contains('open');
+    card.classList.toggle('open');
+    if (!wasOpen && !drawn) { drawn = true; draw(); }
+  });
+
+  return card;
+}
+
+// ── folder view wiring ──
+
+document.getElementById('fldFileInput').addEventListener('change', e => {
+  loadFolderDataset(e.target.files[0]);
+  e.target.value = '';
+});
+
+const fua = document.getElementById('fldUploadArea');
+fua.addEventListener('dragover', e => { e.preventDefault(); fua.classList.add('drag-over'); });
+fua.addEventListener('dragleave', () => fua.classList.remove('drag-over'));
+fua.addEventListener('drop', e => {
+  e.preventDefault(); fua.classList.remove('drag-over');
+  loadFolderDataset(e.dataTransfer.files[0]);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // Top-level navigation
 // ═════════════════════════════════════════════════════════════════════════════
 
 const TAGLINES = {
   ecfr: 'Federal Register proposed rules vs. current eCFR text',
   compare: 'Cross-document section conflicts across multiple .docx files',
+  folder: 'Conflicts across a whole folder of .docx files, from folder_compare.py',
 };
 
 function switchView(view) {
