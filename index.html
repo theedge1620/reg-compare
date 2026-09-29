@@ -158,7 +158,6 @@
   .sec-title.untitled { color: var(--ink-faint); font-style: italic; }
   .sec-badge { font-family: sans-serif; font-size: 0.68rem; font-weight: 600; border-radius: 999px; padding: 0.1rem 0.5rem; white-space: nowrap; flex-shrink: 0; }
   .sec-badge.variants { background: var(--warn-bg); color: var(--warn); }
-<<<<<<< HEAD
   .sec-badge.elision { background: var(--omit-bg); color: var(--omit-fg); font-family: var(--mono); letter-spacing: -0.05em; }
   .sec-badge.forms { background: var(--accent-light); color: var(--accent); }
   .sec-badge.sim { background: var(--omit-bg); color: var(--omit-fg); font-family: var(--mono); }
@@ -171,10 +170,6 @@
   .instr-line .doc-tag { width: 1.1rem; height: 1.1rem; font-size: 0.65rem; }
   .instr-num { font-family: var(--mono); font-weight: 700; color: var(--ink); flex-shrink: 0; }
   .instr-text { font-style: italic; }
-=======
-  .sec-badge.titles { background: var(--del-bg); color: var(--del); }
-  .sec-badge.sim { background: var(--omit-bg); color: var(--omit-fg); font-family: var(--mono); }
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
   .sec-docs { display: flex; gap: 0.2rem; flex-shrink: 0; }
   .sec-docs .doc-tag { width: 1.1rem; height: 1.1rem; font-size: 0.65rem; }
   .sec-docs .doc-tag.absent { opacity: 0.22; }
@@ -247,11 +242,7 @@
       <input type="file" id="cmpFileInput" accept=".docx" multiple />
       <div class="upload-icon">📚</div>
       <h2>Drop two or more .docx files here</h2>
-<<<<<<< HEAD
       <p>Matches subsections within each section · Lists only subsections that conflict between documents</p>
-=======
-      <p>Detects numbered sections in each document · Lists only sections that conflict between documents</p>
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
     </div>
 
     <div class="file-chips" id="cmpFileChips"></div>
@@ -277,7 +268,6 @@
     Only paragraphs referenced in the proposed rule are shown; <em>* * * * *</em> spans collapse unchanged text.
   </div>
   <div class="footer-note" data-view="compare">
-<<<<<<< HEAD
     Subsections are matched only within the same section — <code>§ 50.55a</code> <code>(b)(2)</code> is compared
     against <code>(b)(2)</code> of <code>§ 50.55a</code> alone, never across sections.
     A <code>* * *</code> marker means the text up to the next listed subsection is unchanged, so it is not compared.
@@ -285,11 +275,6 @@
     section heading, that text is compared and the instruction is shown as context; where the instruction stands alone,
     the instruction itself is compared, against other instructions only.
     Comparison ignores case, whitespace and smart-quote/dash styling; the redline is verbatim.
-=======
-    Sections are matched across documents by their number — <code>3.2.1</code>, <code>§ 50.55a</code>, <code>Section 5</code>.
-    A section is flagged when it appears in two or more documents with differing text.
-    Comparison ignores case, whitespace and smart-quote/dash styling; the redline shows the text verbatim.
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
     Files are read entirely in your browser — nothing is uploaded.
   </div>
 </footer>
@@ -1459,7 +1444,6 @@ async function readDocxParagraphs(file) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-<<<<<<< HEAD
 // Amendment document structure
 // ─────────────────────────────────────────────────────────────────────────────
 //
@@ -1786,74 +1770,6 @@ function parseAmendmentDoc(paras) {
   closeInstruction();
 
   return { units, instructions };
-=======
-// Section detection — numbered section text
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Recognised heading forms:
-//   § 50.55a Codes and standards.      → 50.55a
-//   §§ 50.55a                          → 50.55a
-//   Section 3.2.1 — Scope / Sec. 5.    → 3.2.1 / 5
-//   3.2.1 Scope   /   3.2.1. Scope     → 3.2.1
-//   1. PURPOSE                         → 1        (heading-like lines only)
-
-const SECTION_RULES = [
-  { re: /^§{1,2}\s*(\d+[A-Za-z]?(?:\.\d+[A-Za-z]*)*)\s*[.:—–-]?\s*(.*)$/ },
-  { re: /^(?:Sections?|Secs?\.)\s+(\d+(?:\.\d+)*[A-Za-z]?)\s*[.:—–-]?\s*(.*)$/i },
-  { re: /^(\d+(?:\.\d+)+[A-Za-z]?)\.?\s+(.*)$/ },
-  { re: /^(\d{1,2})\.\s+(.*)$/, singleLevel: true },
-];
-
-function detectSectionHeading(text) {
-  for (const rule of SECTION_RULES) {
-    const m = text.match(rule.re);
-    if (!m) continue;
-
-    const number = m[1].replace(/\.+$/, '');
-    const title = (m[2] || '').trim();
-
-    // Reject implausible numbering (dates, quantities like "2.5 million").
-    const parts = number.split('.');
-    if (parts.some(seg => Number(seg.replace(/[A-Za-z]/g, '')) > 999)) continue;
-
-    // A bare "1." only counts as a heading when the line reads like one.
-    if (rule.singleLevel) {
-      const words = title ? title.split(/\s+/).length : 0;
-      if (title.length > 90 || words > 14) continue;
-    }
-
-    return { key: number.toUpperCase(), number, title };
-  }
-  return null;
-}
-
-// Group a document's paragraphs into sections keyed by section number.
-// Where a number occurs more than once (a table-of-contents line plus the real
-// section, most often) the longest occurrence wins.
-function buildSections(paras) {
-  const found = [];
-  let cur = null;
-
-  for (const text of paras) {
-    const head = detectSectionHeading(text);
-    if (head) {
-      if (cur) found.push(cur);
-      cur = { key: head.key, number: head.number, title: head.title, paras: [text] };
-    } else if (cur) {
-      cur.paras.push(text);
-    }
-    // Paragraphs before the first heading (cover page, preamble) are ignored.
-  }
-  if (cur) found.push(cur);
-
-  const byKey = new Map();
-  for (const s of found) {
-    s.text = s.paras.join('\n');
-    const prev = byKey.get(s.key);
-    if (!prev || s.text.length > prev.text.length) byKey.set(s.key, s);
-  }
-  return byKey;
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1906,7 +1822,6 @@ function compareSectionNumbers(a, b) {
   return 0;
 }
 
-<<<<<<< HEAD
 // Order units by section, then by subsection path.
 function compareUnits(a, b) {
   return compareSectionNumbers(a.section, b.section) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
@@ -1922,15 +1837,6 @@ function analyzeDocuments(docs) {
     for (const [key, unit] of doc.units) {
       if (!index.has(key)) index.set(key, []);
       index.get(key).push({ doc, unit });
-=======
-// Returns { conflicts[], stats{} } for the currently loaded documents.
-function analyzeDocuments(docs) {
-  const index = new Map(); // section key → [{ doc, sec }]
-  for (const doc of docs) {
-    for (const [key, sec] of doc.sections) {
-      if (!index.has(key)) index.set(key, []);
-      index.get(key).push({ doc, sec });
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
     }
   }
 
@@ -1940,7 +1846,6 @@ function analyzeDocuments(docs) {
   for (const [key, entries] of index) {
     if (entries.length < 2) { uniqueToOne++; continue; }
 
-<<<<<<< HEAD
     // Distinct text variants across the documents holding this subsection.
     const variants = new Map(); // normalized text → [entry, …]
     for (const e of entries) {
@@ -1966,28 +1871,10 @@ function analyzeDocuments(docs) {
         if (entries[i].unit.kind !== entries[j].unit.kind) continue;
         if (normForCompare(entries[i].unit.text) === normForCompare(entries[j].unit.text)) continue;
         const sim = similarity(entries[i].unit.text, entries[j].unit.text);
-=======
-    // Distinct text variants across the documents holding this section.
-    const variants = new Map(); // normalized text → [entry, …]
-    for (const e of entries) {
-      const n = normForCompare(e.sec.text);
-      if (!variants.has(n)) variants.set(n, []);
-      variants.get(n).push(e);
-    }
-    if (variants.size < 2) { agreeing++; continue; }
-
-    // Most divergent pair — used for ranking and as the default redline pair.
-    let worst = null;
-    for (let i = 0; i < entries.length; i++) {
-      for (let j = i + 1; j < entries.length; j++) {
-        if (normForCompare(entries[i].sec.text) === normForCompare(entries[j].sec.text)) continue;
-        const sim = similarity(entries[i].sec.text, entries[j].sec.text);
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
         if (!worst || sim < worst.sim) worst = { a: i, b: j, sim };
       }
     }
 
-<<<<<<< HEAD
     // No same-kind pair disagrees — the only difference is how the drafts
     // express this subsection. Rank it as similar so it does not crowd the top
     // of the "most divergent" list; the badge explains what it is.
@@ -2016,36 +1903,19 @@ function analyzeDocuments(docs) {
         doc: e.doc,
         list: (e.doc.instructions || []).filter(ins => ins.refs.includes(section)),
       })).filter(x => x.list.length),
-=======
-    const titles = new Set(entries.map(e => normForCompare(e.sec.title)).filter(Boolean));
-
-    conflicts.push({
-      key,
-      number: entries[0].sec.number,
-      title: entries.find(e => e.sec.title)?.sec.title || '',
-      entries,
-      variantCount: variants.size,
-      titlesDiffer: titles.size > 1,
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
       worst: worst || { a: 0, b: 1, sim: 0 },
     });
   }
 
-<<<<<<< HEAD
   const sectionsTouched = new Set(conflicts.map(c => c.section));
 
-=======
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
   return {
     conflicts,
     stats: {
       docs: docs.length,
       common: index.size - uniqueToOne,
       conflicts: conflicts.length,
-<<<<<<< HEAD
       sections: sectionsTouched.size,
-=======
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
       agreeing,
       uniqueToOne,
     },
@@ -2082,31 +1952,21 @@ function lcsOps(a, b) {
   return ops;
 }
 
-<<<<<<< HEAD
 // Pair up each run of changes so a rewritten paragraph shows as one two-column
 // row rather than a deletion row followed by an insertion row. The whole
 // contiguous non-equal block is gathered first, because lcsOps may emit its
 // insertions before its deletions depending on how the DP ties break.
-=======
-// Pair up adjacent delete/insert runs so a rewritten paragraph shows as one
-// two-column row rather than a deletion row followed by an insertion row.
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
 function mergeReplacements(ops) {
   const out = [];
   let i = 0;
   while (i < ops.length) {
     if (ops[i].type === 'eq') { out.push(ops[i]); i++; continue; }
     const dels = [], ins = [];
-<<<<<<< HEAD
     while (i < ops.length && ops[i].type !== 'eq') {
       if (ops[i].type === 'del') dels.push(ops[i].a);
       else ins.push(ops[i].b);
       i++;
     }
-=======
-    while (i < ops.length && ops[i].type === 'del') dels.push(ops[i].a), i++;
-    while (i < ops.length && ops[i].type === 'ins') ins.push(ops[i].b), i++;
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
     const paired = Math.min(dels.length, ins.length);
     for (let k = 0; k < paired; k++) out.push({ type: 'rep', a: dels[k], b: ins[k] });
     for (let k = paired; k < dels.length; k++) out.push({ type: 'del', a: dels[k] });
@@ -2151,11 +2011,7 @@ function diffParagraphBlocks(aText, bText) {
 const DOC_COLORS = ['#2d6a9f', '#a01a1a', '#1a7a3a', '#7a5a00', '#6a3a9f', '#0f6f77', '#a04a1a', '#4a4a6a'];
 const DOC_TAGS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
-<<<<<<< HEAD
 let cmpDocs = [];        // { id, tag, color, name, size, units, instructions, error }
-=======
-let cmpDocs = [];        // { id, tag, color, name, size, sections, error }
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
 let cmpSort = 'divergent';
 let cmpDocFilter = 'all';
 let cmpNextId = 0;
@@ -2185,7 +2041,6 @@ async function addComparisonFiles(fileList) {
     if (cmpDocs.some(d => d.name === file.name && d.size === file.size)) continue;
 
     setStatusIn('cmpStatusBar', '⏳', 'Reading documents…', file.name);
-<<<<<<< HEAD
     const doc = {
       id: cmpNextId++, name: file.name, size: file.size,
       units: new Map(), instructions: [], error: null,
@@ -2194,11 +2049,6 @@ async function addComparisonFiles(fileList) {
       const parsed = parseAmendmentDoc(await readDocxParagraphs(file));
       doc.units = parsed.units;
       doc.instructions = parsed.instructions;
-=======
-    const doc = { id: cmpNextId++, name: file.name, size: file.size, sections: new Map(), error: null };
-    try {
-      doc.sections = buildSections(await readDocxParagraphs(file));
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
     } catch (err) {
       doc.error = err.message;
     }
@@ -2223,18 +2073,12 @@ function renderFileChips() {
   for (const doc of cmpDocs) {
     const chip = document.createElement('div');
     chip.className = 'file-chip' + (doc.error ? ' error' : '');
-<<<<<<< HEAD
     const sectionCount = new Set(Array.from(doc.units.values(), u => u.section)).size;
     const meta = doc.error
       ? `<span class="file-chip-meta" style="color:var(--del)">${esc(doc.error)}</span>`
       : `<span class="file-chip-meta">${sectionCount} section${sectionCount !== 1 ? 's' : ''} ·
          ${doc.units.size} subsection${doc.units.size !== 1 ? 's' : ''} ·
          ${doc.instructions.length} instruction${doc.instructions.length !== 1 ? 's' : ''}</span>`;
-=======
-    const meta = doc.error
-      ? `<span class="file-chip-meta" style="color:var(--del)">${esc(doc.error)}</span>`
-      : `<span class="file-chip-meta">${doc.sections.size} section${doc.sections.size !== 1 ? 's' : ''}</span>`;
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
     chip.innerHTML = `${docTagHtml(doc)}<span class="file-chip-name">${esc(doc.name)}</span>${meta}
       <button class="file-chip-remove" type="button" title="Remove">✕</button>`;
     chip.querySelector('.file-chip-remove').addEventListener('click', () => removeComparisonDoc(doc.id));
@@ -2272,46 +2116,28 @@ function renderComparison(skipped = 0) {
 
   setStatusIn('cmpStatusBar', conflicts.length ? '⚠️' : '✅',
     conflicts.length
-<<<<<<< HEAD
       ? `${conflicts.length} conflicting subsection${conflicts.length !== 1 ? 's' : ''} found`
       : 'No conflicting subsections found',
     conflicts.length
       ? `In ${stats.sections} section${stats.sections !== 1 ? 's' : ''} across ${stats.docs} documents · click one to open its redline.${skipNote}`
       : `All ${stats.common} shared subsection${stats.common !== 1 ? 's' : ''} match across the documents.${skipNote}`);
-=======
-      ? `${conflicts.length} conflicting section${conflicts.length !== 1 ? 's' : ''} found`
-      : 'No conflicting sections found',
-    conflicts.length
-      ? `Across ${stats.docs} documents · click a section to open its redline.${skipNote}`
-      : `All ${stats.common} shared section${stats.common !== 1 ? 's' : ''} match across the documents.${skipNote}`);
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
 
   // ── summary strip ──
   const sum = document.createElement('div');
   sum.className = 'cmp-summary';
   sum.innerHTML = `
     <div class="cmp-stat"><span class="n">${stats.docs}</span><span class="k">Documents</span></div>
-<<<<<<< HEAD
     <div class="cmp-stat"><span class="n">${stats.common}</span><span class="k">Shared subsections</span></div>
     <div class="cmp-stat"><span class="n${stats.conflicts ? ' flag' : ''}">${stats.conflicts}</span><span class="k">Conflicts</span></div>
     <div class="cmp-stat"><span class="n">${stats.sections}</span><span class="k">Sections affected</span></div>
-=======
-    <div class="cmp-stat"><span class="n">${stats.common}</span><span class="k">Shared sections</span></div>
-    <div class="cmp-stat"><span class="n${stats.conflicts ? ' flag' : ''}">${stats.conflicts}</span><span class="k">Conflicts</span></div>
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
     <div class="cmp-stat"><span class="n">${stats.agreeing}</span><span class="k">In agreement</span></div>
     <div class="cmp-stat"><span class="n">${stats.uniqueToOne}</span><span class="k">In one doc only</span></div>`;
   out.appendChild(sum);
 
   if (!conflicts.length) {
     out.innerHTML += stats.common
-<<<<<<< HEAD
       ? `<div class="empty-state"><div class="icon">✅</div>No conflicts detected.<br>Every subsection shared by these documents has matching text.</div>`
       : `<div class="empty-state"><div class="icon">🔍</div>No subsection appears in more than one document.<br>Check that the documents use section headings such as <code>§ 50.55a</code> with lettered or numbered paragraphs.</div>`;
-=======
-      ? `<div class="empty-state"><div class="icon">✅</div>No conflicts detected.<br>Every section number shared by these documents has matching text.</div>`
-      : `<div class="empty-state"><div class="icon">🔍</div>No section number appears in more than one document.<br>Check that the documents use numbered sections such as <code>3.2.1</code> or <code>§ 50.55a</code>.</div>`;
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
     return;
   }
 
@@ -2354,21 +2180,12 @@ function renderComparison(skipped = 0) {
 
   // ── conflict cards ──
   conflicts.sort((a, b) => cmpSort === 'number'
-<<<<<<< HEAD
     ? compareUnits(a, b)
     : (a.worst.sim - b.worst.sim) || compareUnits(a, b));
 
   const hdr = document.createElement('div');
   hdr.className = 'amendments-header';
   hdr.innerHTML = `<h2>Conflicting Subsections</h2><span class="badge">${conflicts.length} found</span>`;
-=======
-    ? compareSectionNumbers(a.number, b.number)
-    : a.worst.sim - b.worst.sim);
-
-  const hdr = document.createElement('div');
-  hdr.className = 'amendments-header';
-  hdr.innerHTML = `<h2>Conflicting Sections</h2><span class="badge">${conflicts.length} found</span>`;
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
   out.appendChild(hdr);
 
   const list = document.createElement('div');
@@ -2391,7 +2208,6 @@ function buildConflictCard(conflict, allDocs) {
 
   const variantBadge = conflict.variantCount > 2
     ? `<span class="sec-badge variants">${conflict.variantCount} variants</span>` : '';
-<<<<<<< HEAD
   const elisionBadge = conflict.hasElision
     ? `<span class="sec-badge elision" title="Unchanged text elided with * * *">* * *</span>` : '';
   const formBadge = conflict.formsDiffer
@@ -2417,25 +2233,11 @@ function buildConflictCard(conflict, allDocs) {
       <span class="sec-title${conflict.title ? '' : ' untitled'}">${esc(conflict.title || '')}</span>
       ${variantBadge}${elisionBadge}${formBadge}
       <span class="sec-badge sim">${conflict.formOnly ? '—' : pct + '% alike'}</span>
-=======
-  const titleBadge = conflict.titlesDiffer
-    ? `<span class="sec-badge titles">heading differs</span>` : '';
-
-  card.innerHTML = `
-    <div class="conflict-card-header">
-      <span class="sec-num">${esc(conflict.number)}</span>
-      <span class="sec-title${conflict.title ? '' : ' untitled'}">${esc(conflict.title || 'untitled section')}</span>
-      ${variantBadge}${titleBadge}
-      <span class="sec-badge sim">${pct}% alike</span>
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
       <span class="sec-docs">${tags}</span>
       <span class="amend-toggle">▼</span>
     </div>
     <div class="conflict-body">
-<<<<<<< HEAD
       ${instrHtml}
-=======
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
       <div class="pair-picker">
         <span>Redline</span>
         <select class="pick-a"></select>
@@ -2450,12 +2252,8 @@ function buildConflictCard(conflict, allDocs) {
   const selB = card.querySelector('.pick-b');
   for (const sel of [selA, selB]) {
     sel.innerHTML = conflict.entries
-<<<<<<< HEAD
       .map((e, i) => `<option value="${i}">${esc(e.doc.tag + ' · ' + trunc(e.doc.name, 34)
         + (e.unit.kind === 'instruction' ? ' (instruction)' : ''))}</option>`)
-=======
-      .map((e, i) => `<option value="${i}">${esc(e.doc.tag + ' · ' + trunc(e.doc.name, 40))}</option>`)
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
       .join('');
   }
   selA.value = String(conflict.worst.a);
@@ -2473,7 +2271,6 @@ function buildConflictCard(conflict, allDocs) {
       area.innerHTML = `<div class="docx-note">Pick two different documents to see a redline.</div>`;
       return;
     }
-<<<<<<< HEAD
     if (normForCompare(a.unit.text) === normForCompare(b.unit.text)) {
       note.className = 'pair-note same';
       note.textContent = 'These two agree';
@@ -2497,17 +2294,10 @@ function buildConflictCard(conflict, allDocs) {
           `${txt.doc.tag} — amendatory text`,
           `${ins.doc.tag} — instruction only`
         )}`;
-=======
-    if (normForCompare(a.sec.text) === normForCompare(b.sec.text)) {
-      note.className = 'pair-note same';
-      note.textContent = 'These two agree';
-      area.innerHTML = `<div class="docx-note">✅ ${esc(a.doc.tag)} and ${esc(b.doc.tag)} carry identical text for this section — the conflict is with another document.</div>`;
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
       return;
     }
 
     note.className = 'pair-note';
-<<<<<<< HEAD
     note.textContent = `${Math.round(similarity(a.unit.text, b.unit.text) * 100)}% alike`;
 
     const elided = (a.unit.hasElision || b.unit.hasElision)
@@ -2516,11 +2306,6 @@ function buildConflictCard(conflict, allDocs) {
 
     area.innerHTML = elided + renderDiffRows(
       diffParagraphBlocks(a.unit.text, b.unit.text),
-=======
-    note.textContent = `${Math.round(similarity(a.sec.text, b.sec.text) * 100)}% alike`;
-    area.innerHTML = renderDiffRows(
-      diffParagraphBlocks(a.sec.text, b.sec.text),
->>>>>>> f6408cfdae2a57b74587b6ae582e0d099c0968e9
       `${a.doc.tag} — ${trunc(a.doc.name, 46)}`,
       `${b.doc.tag} — ${trunc(b.doc.name, 46)}`
     );
