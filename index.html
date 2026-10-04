@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RegDiff — Federal Register vs eCFR</title>
+<title>RegDocDiff — Federal Register vs eCFR</title>
 <style>
   :root {
     --ink: #1a1a2e;
@@ -246,7 +246,7 @@
 <body>
 
 <header>
-  <div class="logo">Reg<span>Diff</span></div>
+  <div class="logo">RegDoc<span>Diff</span></div>
   <div class="tagline" id="tagline">Federal Register proposed rules vs. current eCFR text</div>
   <nav class="tabs">
     <button class="tab active" data-view="ecfr" type="button">eCFR Analysis</button>
@@ -305,7 +305,7 @@
       <input type="file" id="fldFileInput" accept=".json,application/json" />
       <div class="upload-icon">🗂️</div>
       <h2>Drop a folder-comparison dataset here</h2>
-      <p>Load the <code>regdiff-folder.json</code> written by <code>folder_compare.py</code></p>
+      <p>Load the <code>regdocdiff-folder.json</code> written by <code>folder_compare.py</code></p>
     </div>
 
     <details class="fld-howto" id="fldHowto" open>
@@ -316,8 +316,8 @@
           <pre>python folder_compare.py "C:\path\to\folder"</pre>
           Add <code>--recursive</code> to include subfolders, or <code>-o</code> to choose where the results go.
         </li>
-        <li>It writes <code>regdiff-folder.json</code> (load it here), <code>regdiff-folder.csv</code>, and —
-          when <code>openpyxl</code> is installed — <code>regdiff-folder.xlsx</code> with real strikethrough redlines.</li>
+        <li>It writes <code>regdocdiff-folder.json</code> (load it here), <code>regdocdiff-folder.csv</code>, and —
+          when <code>openpyxl</code> is installed — <code>regdocdiff-folder.xlsx</code> with real strikethrough redlines.</li>
       </ol>
     </details>
 
@@ -348,6 +348,9 @@
     A numbered <code>46.</code>-style instruction precedes the section it names: where amendatory text follows the
     section heading, that text is compared and the instruction is shown as context; where the instruction stands alone,
     the instruction itself is compared, against other instructions only.
+    A number without a <code>§</code> (e.g. <code>2.326 Motions to reopen.</code>) starts a section only if an instruction
+    names it, or it is a Title 10 section in the eCFR whose heading matches — so quantities such as <code>0.001 rem</code>
+    are read as text.
     Comparison ignores case, whitespace and smart-quote/dash styling; the redline is verbatim.
     Files are read entirely in your browser — nothing is uploaded.
   </div>
@@ -853,6 +856,75 @@ async function getTitle10Date() {
   } catch(e) { console.warn('titles.json failed:', e); }
   _title10Date = '2026-04-14';
   return _title10Date;
+}
+
+// ── Title 10 section list ───────────────────────────────────────────────────
+//
+//   GET /api/versioner/v1/structure/{date}/title-10.json
+//       → the full hierarchy; every node of type "section" carries its
+//         identifier ("50.55a") and heading (label_description).
+//
+// Used to tell a real section heading that lost its "§" ("2.326 Motions to
+// reopen.") from a number that merely starts a line ("0.001 rem …"). The list
+// is cached in localStorage per eCFR date; if the eCFR can't be reached, the
+// last cached list is used, and failing that, none.
+// folder_compare.py's load_title10_sections() does the same — keep in step.
+
+const T10_CACHE_KEY = 'regdiff.title10Sections.v1';
+const SECTION_ID_RE = /^\d+[A-Za-z]?(?:\.\d+[A-Za-z]*)*$/;   // skips ranges like "1.40-1.41"
+let _title10Sections = null;   // Promise<{ map: Map|null, date, source }>
+
+function readTitle10Cache() {
+  try { return JSON.parse(localStorage.getItem(T10_CACHE_KEY) || 'null'); } catch { return null; }
+}
+
+function writeTitle10Cache(value) {
+  try { localStorage.setItem(T10_CACHE_KEY, JSON.stringify(value)); } catch { /* storage unavailable */ }
+}
+
+function title10SectionsFromStructure(root) {
+  const sections = {};
+  (function walk(node) {
+    if (node.type === 'section' && SECTION_ID_RE.test(node.identifier || '')) {
+      sections[node.identifier] = node.label_description || '';
+    }
+    for (const child of node.children || []) walk(child);
+  })(root);
+  return sections;
+}
+
+function getTitle10Sections() {
+  if (_title10Sections) return _title10Sections;
+  _title10Sections = (async () => {
+    const cached = readTitle10Cache();
+    try {
+      const date = await getTitle10Date();
+      if (cached && cached.date === date && cached.sections) {
+        return { map: new Map(Object.entries(cached.sections)), date, source: 'cache' };
+      }
+      const r = await fetch(`https://www.ecfr.gov/api/versioner/v1/structure/${date}/title-10.json`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const sections = title10SectionsFromStructure(await r.json());
+      writeTitle10Cache({ date, sections });
+      return { map: new Map(Object.entries(sections)), date, source: 'eCFR' };
+    } catch (e) {
+      console.warn('eCFR Title 10 section list unavailable:', e);
+      if (cached && cached.sections) {
+        return { map: new Map(Object.entries(cached.sections)), date: cached.date, source: 'stale cache' };
+      }
+      return { map: null, date: null, source: null };
+    }
+  })();
+  return _title10Sections;
+}
+
+// One-line description of which section list was used, for status bars.
+function title10Note(info) {
+  if (!info) return '';
+  if (!info.map) {
+    return ' · eCFR section list unavailable, so an unmarked number counts as a section only when an instruction names it';
+  }
+  return ` · section numbers checked against eCFR Title 10 as of ${info.date}${info.source === 'stale cache' ? ' (cached; eCFR unreachable)' : ''}`;
 }
 
 // Returns a paragraph map: label → text, plus a special '_full_' key with raw text.
@@ -1553,17 +1625,22 @@ const ELISION_RE      = /^\*(?:\s*\*){2,}\s*$/;
 // Section references inside instruction text: "§ 50.55a", "§§ 50.55a", "Section 50.55a"
 const SECTION_REF_RE  = /(?:§{1,2}|\bSections?\b|\bSecs?\.)\s*(\d+[A-Za-z]?(?:\.\d+[A-Za-z]*)*)/gi;
 
-// `cited` means the number carried a "§" or "Section" prefix, which makes it
-// unambiguous — CFR subparts run to four digits (§ 20.1406, § 50.1201), so no
-// magnitude cap applies. Only bare dotted numbering ("3.2.1 Scope") needs the
-// guard, and only to reject decimal quantities such as "2.5 million".
-function plausibleSectionNumber(number, cited = false) {
-  const parts = number.split('.');
-  return parts.every(seg => {
-    const n = Number(seg.replace(/[A-Za-z]/g, ''));
-    if (Number.isNaN(n)) return false;
-    return cited || n <= 999;
-  });
+// A bare number opening a line ("2.326 Motions to reopen.") is a section
+// heading only when something vouches for it; otherwise it is a quantity that
+// happens to start the line ("0.001 rem in any one hour", "1.5 times the
+// limit"). It counts when either:
+//   • the governing instruction names that section — this covers sections that
+//     are new in the rule and so not yet in the eCFR; or
+//   • it is a Title 10 section in the eCFR AND the text after it matches that
+//     section's eCFR heading. The number alone is not enough: "1.5" is a real
+//     section (10 CFR 1.5).
+// "§"-marked headings are explicit and are not checked.
+const BARE_HEADING_MIN_SIMILARITY = 0.5;
+
+function isBareSectionHeading(number, heading, instr, title10) {
+  if (instr && instr.refs.includes(number)) return true;
+  if (!title10 || !title10.has(number)) return false;
+  return similarity(heading, title10.get(number)) >= BARE_HEADING_MIN_SIMILARITY;
 }
 
 // Pull every section number an instruction claims to affect.
@@ -1573,7 +1650,7 @@ function instructionSectionRefs(text) {
   let m;
   while ((m = SECTION_REF_RE.exec(text)) !== null) {
     const number = m[1].replace(/\.+$/, '');
-    if (plausibleSectionNumber(number, true) && !refs.includes(number)) refs.push(number);
+    if (!refs.includes(number)) refs.push(number);
   }
   return refs;
 }
@@ -1690,12 +1767,15 @@ function instructionParaTargets(text) {
 //   heading, and the replacement text comes after that heading. The regulation
 //   text is the comparable unit (kind: 'text'); the instruction is context only.
 //
+// `title10` is the eCFR section list (Map identifier → heading) used to vet
+// headings that lack a "§"; null when unavailable.
+//
 // Returns { units, instructions }
 //   units        Map "section|path" → { section, sectionTitle, path, text, kind,
 //                                       hasElision, instrNums[] }
 //   instructions [{ num, text, refs[], producedUnits }]
 
-function parseAmendmentDoc(paras) {
+function parseAmendmentDoc(paras, title10 = null) {
   const units = new Map();
   const instructions = [];
 
@@ -1813,9 +1893,15 @@ function parseAmendmentDoc(paras) {
     }
 
     // ── section heading ──
-    const mCited = line.match(SECTION_HEAD_RE);
-    const mSec = mCited || line.match(DOTTED_HEAD_RE);
-    if (mSec && plausibleSectionNumber(mSec[1].replace(/\.+$/, ''), Boolean(mCited))) {
+    // "§ 2.309 …" is explicit; an unmarked "2.326 …" must be vouched for.
+    let mSec = line.match(SECTION_HEAD_RE);
+    if (!mSec) {
+      const mBare = line.match(DOTTED_HEAD_RE);
+      if (mBare && isBareSectionHeading(mBare[1].replace(/\.+$/, ''), mBare[2].trim(), curInstr, title10)) {
+        mSec = mBare;
+      }
+    }
+    if (mSec) {
       flush();
       // "§ 2.813 [Amended]" is a status marker, not a section title.
       const heading = (mSec[2] || '').trim();
@@ -2089,12 +2175,32 @@ function diffParagraphBlocks(aText, bText) {
 // Comparison view — state and rendering
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── similarity bands (filters on Document and Folder Comparison) ──
+// A conflict is banded by the "% alike" its card shows — the least-similar
+// pair of variants, rounded the same way — so the band always matches the
+// badge. Form-only conflicts (text vs. instruction) have no score and so fall
+// in no band. Whole percents: the bands are contiguous with no overlap.
+const SIM_BANDS = [
+  { id: 'high', label: 'Very similar',     range: '75%+',   min: 75, max: 100 },
+  { id: 'mid',  label: 'Somewhat similar', range: '26–74%', min: 26, max: 74 },
+  { id: 'low',  label: 'Not similar',      range: '≤25%',   min: 0,  max: 25 },
+];
+
+function simBand(sim, formOnly) {
+  if (formOnly || sim === null || sim === undefined) return null;
+  const pct = Math.round(sim * 100);
+  const band = SIM_BANDS.find(b => pct >= b.min && pct <= b.max);
+  return band ? band.id : null;
+}
+
 const DOC_COLORS = ['#2d6a9f', '#a01a1a', '#1a7a3a', '#7a5a00', '#6a3a9f', '#0f6f77', '#a04a1a', '#4a4a6a'];
 const DOC_TAGS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
 let cmpDocs = [];        // { id, tag, color, name, size, units, instructions, error }
+let cmpTitle10 = null;   // result of getTitle10Sections() used for the loaded documents
 let cmpSort = 'divergent';
 let cmpDocFilter = 'all';
+let cmpSimFilter = 'all';    // 'all' or a SIM_BANDS id
 let cmpNextId = 0;
 
 function docTagHtml(doc, extraClass = '') {
@@ -2118,6 +2224,10 @@ async function addComparisonFiles(fileList) {
     return;
   }
 
+  setStatusIn('cmpStatusBar', '⏳', 'Loading the eCFR section list…',
+    'Title 10 section numbers are used to tell section headings from numbers that just start a line');
+  cmpTitle10 = await getTitle10Sections();
+
   for (const file of files) {
     if (cmpDocs.some(d => d.name === file.name && d.size === file.size)) continue;
 
@@ -2127,7 +2237,7 @@ async function addComparisonFiles(fileList) {
       units: new Map(), instructions: [], error: null,
     };
     try {
-      const parsed = parseAmendmentDoc(await readDocxParagraphs(file));
+      const parsed = parseAmendmentDoc(await readDocxParagraphs(file), cmpTitle10.map);
       doc.units = parsed.units;
       doc.instructions = parsed.instructions;
     } catch (err) {
@@ -2199,9 +2309,10 @@ function renderComparison(skipped = 0) {
     conflicts.length
       ? `${conflicts.length} conflicting subsection${conflicts.length !== 1 ? 's' : ''} found`
       : 'No conflicting subsections found',
-    conflicts.length
+    (conflicts.length
       ? `In ${stats.sections} section${stats.sections !== 1 ? 's' : ''} across ${stats.docs} documents · click one to open its redline.${skipNote}`
-      : `All ${stats.common} shared subsection${stats.common !== 1 ? 's' : ''} match across the documents.${skipNote}`);
+      : `All ${stats.common} shared subsection${stats.common !== 1 ? 's' : ''} match across the documents.${skipNote}`)
+    + title10Note(cmpTitle10));
 
   // ── summary strip ──
   const sum = document.createElement('div');
@@ -2242,11 +2353,24 @@ function renderComparison(skipped = 0) {
     bar.appendChild(mkPill(`${doc.tag} · ${n}`, 'doc', String(doc.id), cmpDocFilter === String(doc.id)));
   }
 
-  const sortLabel = document.createElement('span');
-  sortLabel.className = 'filter-label';
-  sortLabel.style.marginLeft = '0.75rem';
-  sortLabel.textContent = 'Sort';
-  bar.appendChild(sortLabel);
+  const mkLabel = text => {
+    const s = document.createElement('span');
+    s.className = 'filter-label';
+    s.style.marginLeft = '0.75rem';
+    s.textContent = text;
+    return s;
+  };
+
+  bar.appendChild(mkLabel('Similarity'));
+  bar.appendChild(mkPill('Any', 'sim', 'all', cmpSimFilter === 'all'));
+  for (const band of SIM_BANDS) {
+    const n = conflicts.filter(c => simBand(c.worst.sim, c.formOnly) === band.id).length;
+    const pill = mkPill(`${band.label} ${band.range} · ${n}`, 'sim', band.id, cmpSimFilter === band.id);
+    pill.title = `${band.label}: ${band.range} alike`;
+    bar.appendChild(pill);
+  }
+
+  bar.appendChild(mkLabel('Sort'));
   bar.appendChild(mkPill('Most divergent', 'sort', 'divergent', cmpSort === 'divergent'));
   bar.appendChild(mkPill('Section order', 'sort', 'number', cmpSort === 'number'));
 
@@ -2254,6 +2378,7 @@ function renderComparison(skipped = 0) {
     const pill = e.target.closest('.filter-pill');
     if (!pill) return;
     if (pill.dataset.group === 'sort') cmpSort = pill.dataset.value;
+    else if (pill.dataset.group === 'sim') cmpSimFilter = pill.dataset.value;
     else cmpDocFilter = pill.dataset.value;
     renderComparison();
   });
@@ -2275,7 +2400,13 @@ function renderComparison(skipped = 0) {
 
   for (const c of conflicts) {
     if (cmpDocFilter !== 'all' && !c.entries.some(e => String(e.doc.id) === cmpDocFilter)) continue;
+    if (cmpSimFilter !== 'all' && simBand(c.worst.sim, c.formOnly) !== cmpSimFilter) continue;
     list.appendChild(buildConflictCard(c, usable));
+  }
+  const shown = list.children.length;
+  if (shown !== conflicts.length) hdr.querySelector('.badge').textContent = `${shown} of ${conflicts.length} shown`;
+  if (!shown) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">🔍</div>No conflicts match these filters.</div>`;
   }
 }
 
@@ -2432,14 +2563,14 @@ cua.addEventListener('drop', e => {
 //   { t: 'omit', n }                  — n unchanged paragraphs
 //   { t: 'diff', ops: [[op, text]] }  — op "=" unchanged, "-" deleted, "+" inserted
 
-const FLD_SCHEMA = 'regdiff-folder/1';
+const FLD_SCHEMA = 'regdiff-folder/1';   // format id; kept from the RegDiff name so existing datasets still load
 const FLD_PAGE = 50;
 
 let fld = null;
 let fldView = null;
 
 function fldResetView() {
-  fldView = { q: '', doc: 'all', type: 'all', sort: 'number', shown: FLD_PAGE };
+  fldView = { q: '', doc: 'all', type: 'all', sim: 'all', sort: 'number', shown: FLD_PAGE };
 }
 
 async function loadFolderDataset(file) {
@@ -2517,6 +2648,7 @@ function fldMatches(c) {
     case 'form':        if (!c.formsDiffer) return false; break;
     case 'multi':       if (c.variantCount < 3) return false; break;
   }
+  if (fldView.sim !== 'all' && simBand(c.minSimilarity, c.formOnly) !== fldView.sim) return false;
   return !fldView.q || fldSearchBlob(c).includes(fldView.q);
 }
 
@@ -2538,8 +2670,13 @@ function renderFolder() {
   // ── source ──
   const meta = document.createElement('div');
   meta.className = 'fld-meta';
+  const ecfr = 'ecfr' in fld
+    ? (fld.ecfr
+        ? `<span>Section numbers checked against eCFR Title 10 as of ${esc(fld.ecfr.date)}${fld.ecfr.source === 'stale cache' ? ' (cached; eCFR was unreachable)' : ''}</span>`
+        : `<span>⚠ Built without the eCFR section list — an unmarked number counted as a section only when an instruction named it</span>`)
+    : '';
   meta.innerHTML = `<span>📁 <code>${esc(fld.folder || '')}</code>${fld.recursive ? ' · including subfolders' : ''}</span>
-    <span>Dataset: ${esc(fld.fileName)}</span>`;
+    <span>Dataset: ${esc(fld.fileName)}</span>${ecfr}`;
   out.appendChild(meta);
 
   // ── summary strip ──
@@ -2595,6 +2732,13 @@ function renderFolder() {
       <option value="instruction">Instruction vs. instruction</option>
       <option value="form">Form differs</option>
       <option value="multi">3 or more variants</option>
+    </select>
+    <select class="fld-select" data-f="sim" aria-label="Filter by similarity">
+      <option value="all">Any similarity</option>
+      ${SIM_BANDS.map(b => {
+        const n = fld.conflicts.filter(c => simBand(c.minSimilarity, c.formOnly) === b.id).length;
+        return `<option value="${b.id}">${b.label} (${b.range}) · ${n}</option>`;
+      }).join('')}
     </select>
     <span class="filter-label" style="margin-left:0.5rem">Sort</span>
     <button class="filter-pill active" data-sort="number" type="button">Section order</button>

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-folder_compare.py — RegDiff folder comparison.
+folder_compare.py — RegDocDiff folder comparison.
 
 Analyzes every .docx amendment document in a folder using the same logic as the
 "Document Comparison" tab of index.html, and writes a dataset of every
 conflicting subsection with its redline:
 
-    regdiff-folder.json   load into the "Folder Comparison" tab of index.html
-    regdiff-folder.csv    one row per redline, [-deleted-] {+inserted+} markup
-    regdiff-folder.xlsx   same rows, with real red strikethrough / green underline
+    regdocdiff-folder.json   load into the "Folder Comparison" tab of index.html
+    regdocdiff-folder.csv    one row per redline, [-deleted-] {+inserted+} markup
+    regdocdiff-folder.xlsx   same rows, with real red strikethrough / green underline
                           (written when openpyxl is installed)
 
 Usage:
@@ -16,6 +16,10 @@ Usage:
 
 The core needs only the Python standard library. openpyxl (bundled with
 Anaconda) is used for the .xlsx output if it is available.
+
+Section numbers written without a "§" are checked against the eCFR's list of
+Title 10 sections (fetched once per eCFR update and cached), so quantities such
+as "0.001 rem" are not mistaken for section headings. Use --no-ecfr to skip it.
 
 Parity note: the parsing, conflict detection and redline algorithms below are a
 line-for-line port of the JavaScript in index.html. Regular expressions are
@@ -30,14 +34,16 @@ import argparse
 import csv
 import datetime as dt
 import json
+import os
 import re
 import sys
 import time
+import urllib.request
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-SCHEMA = "regdiff-folder/1"
+SCHEMA = "regdiff-folder/1"      # format id; kept from the RegDiff name so existing datasets still load
 
 # ─────────────────────────────────────────────────────────────────────────────
 # JavaScript-compatible regex building blocks
@@ -155,24 +161,109 @@ def read_docx_paragraphs(path: Path) -> list[str]:
 # Amendment document structure — port of parseAmendmentDoc() and helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def plausible_section_number(number: str, cited: bool = False) -> bool:
-    """`cited` = carried a § / Section prefix; CFR subparts run to four digits,
-    so only bare dotted numbering is capped (to reject "2.5 million")."""
-    for seg in number.split("."):
-        digits = re.sub(r"[A-Za-z]", "", seg)
-        n = int(digits) if digits else 0       # JS Number('') === 0
-        if not cited and n > 999:
-            return False
-    return True
+BARE_HEADING_MIN_SIMILARITY = 0.5
+
+
+def is_bare_section_heading(number: str, heading: str, instr, title10) -> bool:
+    """A bare number opening a line ("2.326 Motions to reopen.") is a section
+    heading only when vouched for; otherwise it is a quantity that happens to
+    start the line ("0.001 rem in any one hour"). It counts when the governing
+    instruction names that section (covers sections new in the rule, not yet in
+    the eCFR), or when it is a Title 10 section in the eCFR AND the text after
+    it matches that section's eCFR heading — "1.5" alone is a real section."""
+    if instr and number in instr["refs"]:
+        return True
+    if not title10 or number not in title10:
+        return False
+    return similarity(heading, title10[number]) >= BARE_HEADING_MIN_SIMILARITY
 
 
 def instruction_section_refs(text: str) -> list[str]:
     refs: list[str] = []
     for m in SECTION_REF_RE.finditer(text):
         number = m.group(1).rstrip(".")
-        if plausible_section_number(number, True) and number not in refs:
+        if number not in refs:
             refs.append(number)
     return refs
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# eCFR Title 10 section list — port of getTitle10Sections()
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#   GET /api/versioner/v1/titles.json                     → current date
+#   GET /api/versioner/v1/structure/{date}/title-10.json  → every section's
+#                                                            identifier + heading
+#
+# Cached per eCFR date; if the eCFR can't be reached the newest cached list is
+# used, and failing that none (then only instructions can vouch for a heading).
+
+ECFR_API = "https://www.ecfr.gov/api/versioner/v1"
+SECTION_ID_RE = re.compile(r"^[0-9]+[A-Za-z]?(?:\.[0-9]+[A-Za-z]*)*$")   # skips "1.40-1.41"
+
+
+def default_cache_dir() -> Path:
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "regdiff"
+
+
+def _get_json(url: str, timeout: int = 60):
+    req = urllib.request.Request(url, headers={"User-Agent": "regdocdiff-folder-compare/1",
+                                               "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r)
+
+
+def title10_sections_from_structure(root: dict) -> dict[str, str]:
+    sections: dict[str, str] = {}
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if node.get("type") == "section" and SECTION_ID_RE.match(node.get("identifier") or ""):
+            sections[node["identifier"]] = node.get("label_description") or ""
+        stack.extend(node.get("children") or [])
+    return sections
+
+
+def load_title10_sections(cache_dir: Path | None = None, log=print):
+    """Returns (sections, info): sections maps identifier → eCFR heading, or is
+    None when no list could be had; info is {date, sections, source} or None."""
+    cache_dir = cache_dir or default_cache_dir()
+
+    def read(path: Path):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) and data else None
+        except (OSError, ValueError):
+            return None
+
+    try:
+        titles = _get_json(f"{ECFR_API}/titles.json")
+        date = next(t["up_to_date_as_of"] for t in titles["titles"] if t["number"] == 10)
+        path = cache_dir / f"title10-sections-{date}.json"
+        sections = read(path) if path.exists() else None
+        source = "cache"
+        if sections is None:
+            sections = title10_sections_from_structure(
+                _get_json(f"{ECFR_API}/structure/{date}/title-10.json"))
+            source = "eCFR"
+            try:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(sections, ensure_ascii=False), encoding="utf-8")
+            except OSError as e:
+                log(f"note: could not cache the eCFR section list ({e})")
+        return sections, {"date": date, "sections": len(sections), "source": source}
+    except Exception as e:                                # network, HTTP or JSON failure
+        cached = sorted(cache_dir.glob("title10-sections-*.json")) if cache_dir.is_dir() else []
+        for path in reversed(cached):                     # dates sort lexically: newest last
+            sections = read(path)
+            if sections:
+                date = path.stem.removeprefix("title10-sections-")
+                log(f"warning: eCFR unreachable ({e}); using cached section list from {date}")
+                return sections, {"date": date, "sections": len(sections), "source": "stale cache"}
+        log(f"warning: eCFR unreachable ({e}) and no cached section list — an unmarked "
+            f"number will count as a section only when an instruction names it")
+        return None, None
 
 
 def designator_level(token: str, stack: list[str], next_token: str | None) -> int:
@@ -255,8 +346,9 @@ def instruction_para_targets(text: str) -> list[str]:
     return targets
 
 
-def parse_amendment_doc(paras: list[str]):
-    """Returns (units, instructions).
+def parse_amendment_doc(paras: list[str], title10: dict | None = None):
+    """Returns (units, instructions). `title10` is the eCFR section list
+    (identifier → heading) used to vet headings that lack a "§".
 
     units:        dict "section|path" → {section, sectionTitle, path, kind,
                   text, hasElision, instrNums}
@@ -363,9 +455,14 @@ def parse_amendment_doc(paras: list[str]):
             continue
 
         # ── section heading ──
-        m_cited = SECTION_HEAD_RE.match(line)
-        m_sec = m_cited or DOTTED_HEAD_RE.match(line)
-        if m_sec and plausible_section_number(m_sec.group(1).rstrip("."), bool(m_cited)):
+        # "§ 2.309 …" is explicit; an unmarked "2.326 …" must be vouched for.
+        m_sec = SECTION_HEAD_RE.match(line)
+        if not m_sec:
+            m_bare = DOTTED_HEAD_RE.match(line)
+            if m_bare and is_bare_section_heading(m_bare.group(1).rstrip("."), js_trim(m_bare.group(2)),
+                                                  st["instr"], title10):
+                m_sec = m_bare
+        if m_sec:
             flush()
             heading = js_trim(m_sec.group(2) or "")
             st["section"] = {
@@ -612,7 +709,8 @@ def find_docx(folder: Path, recursive: bool) -> list[Path]:
     return sorted(files, key=lambda p: str(p.relative_to(folder)).lower())
 
 
-def analyze_folder(folder: Path, recursive: bool = False, log=print) -> dict:
+def analyze_folder(folder: Path, recursive: bool = False, log=print,
+                   title10: dict | None = None, ecfr_info: dict | None = None) -> dict:
     started = time.time()
     documents: list[dict] = []
     parsed: list[tuple[dict, dict, list]] = []    # (doc, units, instructions)
@@ -624,7 +722,7 @@ def analyze_folder(folder: Path, recursive: bool = False, log=print) -> dict:
                "bytes": path.stat().st_size, "error": None}
         try:
             paras = read_docx_paragraphs(path)
-            units, instructions = parse_amendment_doc(paras)
+            units, instructions = parse_amendment_doc(paras, title10)
             doc.update({
                 "paragraphs": len(paras),
                 "sections": len({u["section"] for u in units.values()}),
@@ -754,6 +852,7 @@ def analyze_folder(folder: Path, recursive: bool = False, log=print) -> dict:
         "tool": "folder_compare.py",
         "folder": str(folder.resolve()),
         "recursive": recursive,
+        "ecfr": ecfr_info,            # Title 10 section list used, or None
         "elapsedSeconds": round(time.time() - started, 2),
         "documents": documents,
         "stats": {
@@ -923,7 +1022,11 @@ def write_xlsx(dataset: dict, path: Path) -> int:
         c.fill = head_fill
 
     ss = wb.create_sheet("Summary")
+    ecfr = dataset.get("ecfr")
+    ecfr_text = (f"Title 10 as of {ecfr['date']} ({ecfr['source']})" if ecfr
+                 else "not used — unmarked numbers counted as sections only when an instruction named them")
     for k, v in [("Folder", dataset["folder"]), ("Generated", dataset["generatedAt"]),
+                 ("eCFR section list", ecfr_text),
                  *[(k, v) for k, v in dataset["stats"].items()]]:
         ss.append([k, v])
     ss.column_dimensions["A"].width = 20
@@ -943,10 +1046,15 @@ def main(argv=None) -> int:
                     "dataset of conflicting subsections with redlines.")
     ap.add_argument("folder", type=Path, help="folder containing .docx files")
     ap.add_argument("-o", "--out-dir", type=Path, help="where to write outputs (default: the folder)")
-    ap.add_argument("--name", default="regdiff-folder", help="output file base name")
+    ap.add_argument("--name", default="regdocdiff-folder", help="output file base name")
     ap.add_argument("-r", "--recursive", action="store_true", help="include subfolders")
     ap.add_argument("--no-csv", action="store_true", help="skip the .csv output")
     ap.add_argument("--no-xlsx", action="store_true", help="skip the .xlsx output")
+    ap.add_argument("--no-ecfr", action="store_true",
+                    help="don't check section numbers against the eCFR Title 10 list (then an "
+                         "unmarked number counts as a section only when an instruction names it)")
+    ap.add_argument("--ecfr-cache", type=Path,
+                    help=f"where to cache the eCFR section list (default: {default_cache_dir()})")
     ap.add_argument("-q", "--quiet", action="store_true", help="only print output paths")
     args = ap.parse_args(argv)
 
@@ -955,9 +1063,17 @@ def main(argv=None) -> int:
         print(f"error: {folder} is not a folder", file=sys.stderr)
         return 2
     log = (lambda *_: None) if args.quiet else print
+    warn = lambda msg: print(msg, file=sys.stderr)      # warnings show even with --quiet
+
+    title10, ecfr_info = None, None
+    if not args.no_ecfr:
+        log("Loading the eCFR Title 10 section list…")
+        title10, ecfr_info = load_title10_sections(args.ecfr_cache, warn)
+        if ecfr_info:
+            log(f"  {ecfr_info['sections']} sections as of {ecfr_info['date']} ({ecfr_info['source']})")
 
     log(f"Scanning {folder.resolve()}{' (recursive)' if args.recursive else ''}")
-    dataset = analyze_folder(folder, args.recursive, log)
+    dataset = analyze_folder(folder, args.recursive, log, title10, ecfr_info)
     s = dataset["stats"]
     if s["documents"] == 0:
         print("error: no .docx files found", file=sys.stderr)
