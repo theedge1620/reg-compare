@@ -68,6 +68,34 @@ SECNUM = r"([0-9]+[A-Za-z]?(?:\.[0-9]+[A-Za-z]*)*)"
 # Numbered instruction. Working drafts use an "XX." placeholder before the
 # amendments are numbered, so those count as instructions too.
 INSTRUCTION_RE = re.compile(r"^([0-9]{1,3}|X{1,3}|x{2,3})\." + S + r"+(.+)$")
+# A numbered line is an instruction only if it reads like one; otherwise it is a
+# numbered regulation paragraph ("3. The Commission may not require …").
+INSTRUCTION_LEAD_RE = re.compile(
+    r"^(?:In" + S + r"+(?:§|part" + B + "|[Aa]ppendix" + B + "|[Ss]ubpart" + B + "|[Ss]ection" + B
+    + "|[Tt]able" + B + "|paragraphs?" + B + "|the" + S
+    + r"+(?:definition|table|heading|introductory|undesignated|entry|list|authority|section))|§"
+    + "|(?:Revise|Add|Amend|Remove|Redesignate|Republish|Reserve|Designate|Transfer|Suspend|Correct|Effective)"
+    + B + "|The authority citation)")
+INSTRUCTION_PASSIVE_RE = re.compile(
+    B + "(?:is|are)" + S + "+(?:hereby" + S + "+)?(?:amended|revised|added|removed|redesignated|republished"
+    "|reserved|corrected|transferred|suspended)" + B + "|" + B + "to read as follows" + B
+    + "|" + B + "continues to read" + B, re.I)
+# Unnumbered instructions (Word list numbering isn't stored as text) must be
+# unmistakable: an instruction opening, amendatory wording and a § reference.
+UNNUMBERED_LEAD_RE = re.compile(
+    r"^(?:In" + S + "+§|Revise" + B + "|Add" + B + "|Amend" + B + "|Remove" + B + "|Redesignate" + B
+    + "|Republish" + B + "|The authority citation for part" + B + ")")
+AUTHORITY_LEAD_RE = re.compile(r"^The authority citation for part" + B)
+AMENDATORY_RE = re.compile(
+    ":" + S + r"*\Z|" + B + "to read as follows" + B + "|" + B + "in its place" + B
+    + "|" + B + "remove and reserve" + B + "|" + B + "continues to read" + B
+    + "|" + B + "(?:is|are)" + S + "+(?:amended|revised|added|removed|redesignated|republished|reserved)" + B
+    + "|" + B + "remove the (?:words?|phrases?|references?|definitions?|sentences?|entry|entries)" + B
+    + "|" + B + "redesignat", re.I)
+# Lettered clauses inside one instruction: "In § 110.45: a. In paragraph …; and b. …"
+CLAUSE_MARK_RE = re.compile(r"([:;.])" + S + "+(?:and" + S + r"+)?([a-z])\." + S + "+")
+# A clause that reprints regulation text rather than editing it in place.
+PRINTS_TEXT_RE = re.compile(r"^(?:Revise|Add|Republish)" + B + "|" + B + "to read as follows" + B, re.I)
 SUBINSTR_RE = re.compile(r"^([a-z])\." + S + r"+(.+)$")
 SECTION_HEAD_RE = re.compile(r"^§{1,2}" + S + "*" + SECNUM + S + "*[.:—–-]?" + S + r"*(.*)$")
 DOTTED_HEAD_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)+[A-Za-z]?)\.?" + S + r"+(.+)$")
@@ -178,9 +206,49 @@ def is_bare_section_heading(number: str, heading: str, instr, title10) -> bool:
     return similarity(heading, title10[number]) >= BARE_HEADING_MIN_SIMILARITY
 
 
+def read_instruction(line: str):
+    """{num, body} when the line is an amendment instruction, else None. `body`
+    is the instruction without its number; unnumbered instructions have num ''."""
+    m = INSTRUCTION_RE.match(line)
+    if m and not DOTTED_HEAD_RE.match(line):
+        body = m.group(2)
+        if INSTRUCTION_LEAD_RE.match(body) or INSTRUCTION_PASSIVE_RE.search(body):
+            return {"num": m.group(1), "body": body}
+        return None
+    if UNNUMBERED_LEAD_RE.match(line) and AMENDATORY_RE.search(line) \
+            and (instruction_section_refs(line) or AUTHORITY_LEAD_RE.match(line)):
+        return {"num": "", "body": line}
+    return None
+
+
+def split_instruction_clauses(body: str):
+    """"In § 110.45: a. In paragraph (b)(3) …; and b. …" → (lead, [clauses])."""
+    marks, expect = [], "a"
+    for m in CLAUSE_MARK_RE.finditer(body):
+        if m.group(2) != expect:
+            continue
+        marks.append(m)
+        expect = chr(ord(expect) + 1)
+    if not marks:
+        return body, []
+    lead = js_trim(body[:marks[0].start() + 1])
+    clauses = [js_trim(body[m.end():marks[i + 1].start() if i + 1 < len(marks) else len(body)])
+               for i, m in enumerate(marks)]
+    return lead, clauses
+
+
+# Quoted phrases in an instruction are text being removed or inserted
+# ('remove the references “§ 50.83 or”'), not what the instruction amends.
+QUOTED_RE = re.compile(r'[“"][^“”"]*[”"]|``[^`]*?' + "''")
+
+
+def unquoted(text: str) -> str:
+    return QUOTED_RE.sub(" ", text)
+
+
 def instruction_section_refs(text: str) -> list[str]:
     refs: list[str] = []
-    for m in SECTION_REF_RE.finditer(text):
+    for m in SECTION_REF_RE.finditer(unquoted(text)):
         number = m.group(1).rstrip(".")
         if number not in refs:
             refs.append(number)
@@ -331,6 +399,7 @@ def resolve_path(tokens: list[str], stack: list[str], next_token: str | None) ->
 
 def instruction_para_targets(text: str) -> list[str]:
     targets: list[str] = []
+    text = unquoted(text)
     for m in PARA_KW_RE.finditer(text):
         pos = m.end()
         while True:
@@ -346,17 +415,153 @@ def instruction_para_targets(text: str) -> list[str]:
     return targets
 
 
+# ── non-regulation text — port of the JS constants of the same names ────────
+#
+# Structural and editorial lines that are not regulation text. Left alone,
+# each is appended to whatever paragraph precedes it and makes that paragraph
+# differ between documents.
+
+PART_HEAD_RE = re.compile(r"^PART" + S + r"+[0-9]+[A-Za-z]?" + S + "*[—–-]")
+SUBPART_HEAD_RE = re.compile(r"^Subpart" + S + r"+[A-Z]{1,3}(?:" + S + "*[—–-]|" + S + "+[A-Z][a-z])")
+APPENDIX_HEAD_RE = re.compile(r"^Appendix" + S + r"+[A-Z0-9]{1,3}" + S + "+to" + S + "+Part"
+                              + S + r"+[0-9]+" + S + "*[—–-]", re.I)
+EDITORIAL_RE = re.compile(r"^(?:Authority:|Source:|Editorial Note:|Secs?\.\Z|_{3,}\Z)")
+TOC_SEC_RE = re.compile(r"^Secs?\.\Z")
+FOOTNOTE_TEXT_RE = re.compile(r"^\[([0-9]{1,3})\]" + S)
+BARE_FOOTNOTE_RE = re.compile(r"^([0-9]{1,2})" + S + "+" + NS)
+FOOTNOTE_MARK_RE = re.compile(r"([A-Za-z)\]”\"’]|[A-Za-z][.,;:])([0-9]{1,2})(?=" + S + r"|\Z)")
+BRACKET_MARK_RE = re.compile(r"\[([0-9]{1,3})\]")
+ISSUANCE_RE = re.compile(r"^For the reasons set (?:out|forth) in the preamble", re.I)
+SIGNATURE_RE = re.compile(r"^(?:Dated" + B + r"|\[FR Doc\.)")
+
+
+def regulation_span(paras: list[str]) -> tuple[int, int]:
+    """[begin, end) of the paragraphs holding regulation text: after the words
+    of issuance when present, and before the signature block."""
+    begin = next((i + 1 for i, p in enumerate(paras) if ISSUANCE_RE.match(js_trim(p))), 0)
+    for i in range(begin, len(paras)):
+        if SIGNATURE_RE.match(js_trim(paras[i])):
+            return begin, i
+    return begin, len(paras)
+
+
+# ── definitions — port of definitionTerm(), termKey(), instructionDefinitionTerms()
+
+DEFINITION_RE = re.compile(
+    r"^(?:(?:For (?:the )?purposes of|As used in) this (?:part|section|subpart|chapter)[,:—–-]?" + S + "+)?"
+    + r"(?:The terms?" + S + r'+)?[“"]?([A-Z0-9](?:[^“”".;:]|\.(?=' + NS + r')){0,100}?)[”"]?,?' + S
+    + r"+(?:means|mean|has the (?:same )?meaning|is defined as|refers to|includes)" + B)
+DEFINITION_PERIOD_RE = re.compile(r'^([A-Z][^“”".;:]{0,80}?)\.(?:' + S + r"+(?=[(A-Z])|\Z)")
+TERM_QUALIFIER_RE = re.compile(r"," + S + "*(?:as used in|for (?:the )?purposes of)" + B + r".*\Z", re.I | re.S)
+NOT_A_TERM_RE = re.compile(B + "(?:shall|must|may|will|should|would|can|could)" + B, re.I)
+DEF_TERMS_RE = re.compile(B + "definitions?" + S + "+(?:of|for)" + S + "+(?:the" + S + "+terms?" + S + "+)?", re.I)
+DEF_TERM_BARE_RE = re.compile(
+    r'^([A-Za-z][^,.;:“”"]{0,80}?)(?=' + S + "+(?:to read|in alphabetical order|is|are|and add|and remove|remove|from)"
+    + B + r'|[,.;:]|\Z)')
+DEF_TERM_QUOTE_RE = re.compile(r"^(?:" + S + "*(?:,|;|and)" + S + "*)*" + S + "*[“\"]([^”\"]+)[”\"]", re.I)
+TERM_TAIL_RE = re.compile(r"[,.;:" + _WS_CLASS + r"]+\Z")
+
+
+def definition_term(line: str) -> str | None:
+    """"Term means …", or the CFR's other style "Term. (1) When applied …"."""
+    m, max_words = DEFINITION_RE.match(line), 12
+    if not m:
+        m, max_words = DEFINITION_PERIOD_RE.match(line), 8
+    if not m:
+        return None
+    term = js_trim(TERM_QUALIFIER_RE.sub("", m.group(1)))
+    if not term or len(WS_RUN_RE.split(term)) > max_words or NOT_A_TERM_RE.search(term):
+        return None
+    return term
+
+
+def term_key(term: str) -> str:
+    """Terms match regardless of case or quote style."""
+    return norm_for_compare(TERM_TAIL_RE.sub("", term))
+
+
+def instruction_definition_terms(text: str) -> list[str]:
+    terms: list[str] = []
+    for m in DEF_TERMS_RE.finditer(text):
+        pos = m.end()
+        quoted = 0
+        while True:
+            q = DEF_TERM_QUOTE_RE.match(text[pos:])
+            if not q:
+                break
+            term = js_trim(TERM_TAIL_RE.sub("", q.group(1)))
+            if term and term not in terms:
+                terms.append(term)
+            pos += len(q.group(0))
+            quoted += 1
+        if not quoted:
+            # Unquoted (italics lost): "the definition for Sealed Source … to read as follows"
+            b = DEF_TERM_BARE_RE.match(text[pos:])
+            term = js_trim(b.group(1)) if b else ""
+            if term and len(WS_RUN_RE.split(term)) <= 8 and term not in terms:
+                terms.append(term)
+    return terms
+
+
+def substantive_key(s: str) -> str:
+    """Comparison key ignoring formatting: case, spacing, punctuation, quote
+    and dash styles, hyphenation and footnote markers. Port of substantiveKey()."""
+    s = BRACKET_MARK_RE.sub(" ", s)
+    s = FOOTNOTE_MARK_RE.sub(r"\1", s)
+    n = len(s)
+    out = []
+    for i, ch in enumerate(s):
+        if ch in "-‐‑" and 0 < i < n - 1 and s[i - 1].isalnum() and s[i + 1].isalnum():
+            continue                                   # "non-power" ≡ "nonpower"
+        out.append(ch if (ch.isalnum() or ch == "§") else " ")
+    return re.sub(" +", " ", "".join(out)).strip(" ").lower()
+
+
 def parse_amendment_doc(paras: list[str], title10: dict | None = None):
     """Returns (units, instructions). `title10` is the eCFR section list
-    (identifier → heading) used to vet headings that lack a "§".
+    (identifier → heading) used to vet headings that lack a "§" and to
+    recognise definitions sections.
 
-    units:        dict "section|path" → {section, sectionTitle, path, kind,
-                  text, hasElision, instrNums}
+    units:        dict "section|path" → {section, sectionTitle, path, pathLabel,
+                  kind, text, hasElision, instrNums}; path is the matching key,
+                  pathLabel how it reads (“focused proceeding” / “Focused Proceeding”)
     instructions: [{num, text, refs, producedUnits}]
     """
     units: dict[str, dict] = {}
     instructions: list[dict] = []
-    st = {"instr": None, "section": None, "stack": [], "unit": None}
+    begin, end = regulation_span(paras)
+    st = {"instr": None, "section": None, "stack": [], "unit": None, "def": None}
+    marks: set[str] = set()       # footnote numbers referenced in the current section
+
+    def set_section(number: str, title: str) -> None:
+        known = title or (title10.get(number) if title10 else None) or ""
+        st["section"] = {"number": number, "title": title, "defs": bool(re.search("definition", known, re.I))}
+        st["stack"] = []
+        st["def"] = None
+        marks.clear()
+
+    def note_marks(text: str) -> None:
+        for m in FOOTNOTE_MARK_RE.finditer(text):
+            marks.add(m.group(2))
+        for m in BRACKET_MARK_RE.finditer(text):
+            marks.add(m.group(1))
+
+    def is_footnote_text(line: str) -> bool:
+        if FOOTNOTE_TEXT_RE.match(line):
+            return True
+        m = BARE_FOOTNOTE_RE.match(line)
+        return bool(m and m.group(1) in marks)
+
+    def starts_section_block(i: int) -> bool:
+        """A "Subpart X—Title" line is a heading only when a section heading
+        (or table of contents) follows; otherwise it is regulation text."""
+        for j in range(i + 1, end):
+            l = js_trim(paras[j])
+            if not l:
+                continue
+            return bool(SECTION_HEAD_RE.match(l) or TOC_SEC_RE.match(l)
+                        or PART_HEAD_RE.match(l) or APPENDIX_HEAD_RE.match(l))
+        return False
 
     def store(u: dict) -> bool:
         if not u["section"]:
@@ -381,7 +586,7 @@ def parse_amendment_doc(paras: list[str], title10: dict | None = None):
                 st["instr"]["producedUnits"] = True
         st["unit"] = None
 
-    def open_unit(path: str) -> None:
+    def open_unit(path: str, label: str | None = None) -> None:
         flush()
         sec = st["section"]
         number = sec["number"] if sec else ""
@@ -390,6 +595,7 @@ def parse_amendment_doc(paras: list[str], title10: dict | None = None):
             "section": number,
             "sectionTitle": sec["title"] if sec else "",
             "path": path,
+            "pathLabel": path if label is None else label,
             "kind": "text",
             "lines": [],
             "hasElision": False,
@@ -397,21 +603,39 @@ def parse_amendment_doc(paras: list[str], title10: dict | None = None):
         }
 
     def close_instruction() -> None:
+        """An instruction with no regulation text is itself the amendment; one
+        that reprints text may still carry in-place edits for other paragraphs.
+        Compared text omits the instruction number."""
         flush()
         ins = st["instr"]
-        if not ins or ins["producedUnits"]:
+        if not ins:
             return
-        targets = instruction_para_targets(ins["text"])
-        for ref in ins["refs"]:
-            for path in (targets or [""]):
-                store({
-                    "section": ref, "sectionTitle": "", "path": path,
-                    "kind": "instruction", "text": ins["text"],
-                    "hasElision": False, "instrNums": [ins["num"]],
-                })
+        lead, clauses = split_instruction_clauses(ins["body"])
+        if clauses:
+            pieces = [(js_trim(f"{lead} {cl}"), cl) for cl in clauses
+                      if not ins["producedUnits"] or not PRINTS_TEXT_RE.search(cl)]
+        else:
+            pieces = [] if ins["producedUnits"] else [(ins["body"], ins["body"])]
+
+        for text, scope in pieces:
+            sub_paths = instruction_para_targets(scope) or [""]
+            # "add paragraph (1)(iii) in the definition for “Construction”"
+            # targets a paragraph *within* that definition.
+            terms = instruction_definition_terms(scope)
+            if terms:
+                paths = [(f"“{term_key(t)}”{p}", f"“{t}”{p}") for t in terms for p in sub_paths]
+            else:
+                paths = [(p, p) for p in sub_paths]
+            for ref in ins["refs"]:
+                for path, label in paths:
+                    store({
+                        "section": ref, "sectionTitle": "", "path": path, "pathLabel": label,
+                        "kind": "instruction", "text": text,
+                        "hasElision": False, "instrNums": [ins["num"]],
+                    })
 
     def peek_next_designator(i: int):
-        for j in range(i + 1, len(paras)):
+        for j in range(i + 1, end):
             l = js_trim(paras[j])
             if not l or ELISION_RE.match(l):
                 continue
@@ -421,8 +645,8 @@ def parse_amendment_doc(paras: list[str], title10: dict | None = None):
             return d[0][0] if d else None
         return None
 
-    for idx, raw in enumerate(paras):
-        line = js_trim(raw)
+    for idx in range(begin, end):
+        line = js_trim(paras[idx])
         if not line:
             continue
 
@@ -432,23 +656,39 @@ def parse_amendment_doc(paras: list[str], title10: dict | None = None):
                 st["unit"]["hasElision"] = True
             continue
 
-        # ── numbered instruction ──
-        m_instr = INSTRUCTION_RE.match(line)
-        if m_instr and not DOTTED_HEAD_RE.match(line):
+        # ── structural headings: end the section; not regulation text ──
+        if PART_HEAD_RE.match(line) or APPENDIX_HEAD_RE.match(line) \
+                or (SUBPART_HEAD_RE.match(line) and starts_section_block(idx)):
+            flush()
+            st["section"] = None
+            st["stack"] = []
+            st["def"] = None
+            continue
+
+        # ── editorial lines and footnotes: skipped ──
+        if EDITORIAL_RE.match(line) or is_footnote_text(line):
+            continue
+
+        # ── amendment instruction ──
+        instr = read_instruction(line)
+        if instr:
             close_instruction()
-            ins = {"num": m_instr.group(1), "text": line,
+            ins = {"num": instr["num"], "text": line, "body": instr["body"],
                    "refs": instruction_section_refs(line), "producedUnits": False}
             st["instr"] = ins
             instructions.append(ins)
             if ins["refs"]:
-                st["section"] = {"number": ins["refs"][0], "title": ""}
-            st["stack"] = []
+                set_section(ins["refs"][0], "")
+            else:
+                st["stack"] = []
+                st["def"] = None
             continue
 
         # ── lettered sub-instruction ──
         if st["instr"] and not st["unit"] and SUBINSTR_RE.match(line):
             ins = st["instr"]
             ins["text"] += " " + line
+            ins["body"] += " " + line
             for r in instruction_section_refs(line):
                 if r not in ins["refs"]:
                     ins["refs"].append(r)
@@ -465,12 +705,8 @@ def parse_amendment_doc(paras: list[str], title10: dict | None = None):
         if m_sec:
             flush()
             heading = js_trim(m_sec.group(2) or "")
-            st["section"] = {
-                "number": m_sec.group(1).rstrip("."),
-                # "§ 2.813 [Amended]" is a status marker, not a title.
-                "title": "" if BRACKET_ONLY_RE.match(heading) else heading,
-            }
-            st["stack"] = []
+            # "§ 2.813 [Amended]" is a status marker, not a title.
+            set_section(m_sec.group(1).rstrip("."), "" if BRACKET_ONLY_RE.match(heading) else heading)
             open_unit("")
             continue
 
@@ -478,18 +714,46 @@ def parse_amendment_doc(paras: list[str], title10: dict | None = None):
         des = leading_designators(line)
         if des:
             tokens, rest = des
-            path = resolve_path(tokens, st["stack"], peek_next_designator(idx))
-            open_unit(path)
+            nxt = peek_next_designator(idx)
+            d = st["def"]
+            # Inside a definition, deeper designators are its sub-paragraphs;
+            # one at or above the definition's own level ends it.
+            if d and designator_level(tokens[0], st["stack"], tokens[1] if len(tokens) > 1 else nxt) <= d["base"]:
+                st["def"] = d = None
+            full = resolve_path(tokens, st["stack"], nxt)
+            if d:
+                sub = "".join(st["stack"][d["base"]:])
+                open_unit(d["path"] + sub, d["label"] + sub)
+            else:
+                open_unit(full)
             if ELISION_RE.match(rest):
                 st["unit"]["hasElision"] = True
             elif rest:
                 st["unit"]["lines"].append(rest)
+                note_marks(rest)
+            continue
+
+        # ── a definition: "Term means …" in a definitions section ──
+        term = definition_term(line) if st["section"] and st["section"]["defs"] else None
+        if term:
+            d = st["def"]
+            # Definitions are top-level, or inside the single lettered paragraph
+            # introducing them; anything deeper is a previous definition's sub-paragraphs.
+            stack = st["stack"]
+            base = d["base"] if d else (1 if len(stack) == 1 and re.fullmatch(r"\([a-z]+\)", stack[0]) else 0)
+            del stack[base:]
+            prefix = "".join(st["stack"])
+            st["def"] = {"base": base, "path": f"{prefix}“{term_key(term)}”", "label": f"{prefix}“{term}”"}
+            open_unit(st["def"]["path"], st["def"]["label"])
+            st["unit"]["lines"].append(line)
+            note_marks(line)
             continue
 
         # ── continuation ──
         unit = st["unit"]
         if unit:
             unit["lines"].append(line)
+            note_marks(line)
             ins = st["instr"]
             if ins and ins["num"] not in unit["instrNums"] \
                     and (not ins["refs"] or unit["section"] in ins["refs"]):
@@ -639,8 +903,8 @@ def diff_paragraph_blocks(a_text: str, b_text: str) -> list[dict]:
             row["coarse"] = True
         return [row]
 
-    ka = [norm_for_compare(x) for x in a]
-    kb = [norm_for_compare(x) for x in b]
+    ka = [substantive_key(x) for x in a]      # formatting-only differences align as unchanged
+    kb = [substantive_key(x) for x in b]
     raw = [(op, a[i] if i is not None else None, b[j] if j is not None else None)
            for op, i, j in _lcs_walk(ka, kb)]
 
@@ -756,7 +1020,7 @@ def analyze_folder(folder: Path, recursive: bool = False, log=print,
         variants: list[dict] = []
         entry_variant: list[int] = []
         for doc, unit, _ in entries:
-            n = norm_for_compare(unit["text"])
+            n = substantive_key(unit["text"])         # formatting-only differences: same variant
             if n not in variant_of:
                 variant_of[n] = len(variants)
                 variants.append({"id": len(variants), "kind": unit["kind"], "text": unit["text"],
@@ -822,6 +1086,7 @@ def analyze_folder(folder: Path, recursive: bool = False, log=print,
             "key": key,
             "section": section,
             "path": entries[0][1]["path"],
+            "pathLabel": entries[0][1].get("pathLabel") or entries[0][1]["path"],
             "title": next((u["sectionTitle"] for _, u, _ in entries if u["sectionTitle"]), ""),
             "docs": [d["id"] for d, _, _ in entries],
             "variantCount": len(variants),
@@ -836,6 +1101,23 @@ def analyze_folder(folder: Path, recursive: bool = False, log=print,
         })
 
     conflicts.sort(key=lambda c: (_section_sort_key(c["section"]), c["path"]))
+
+    # One instruction aimed at several paragraphs ("in paragraphs (a) and (c),
+    # remove …") yields the identical comparison at each; list it once,
+    # labelled with every paragraph. Port of the merge in analyzeDocuments().
+    merged: list[dict] = []
+    by_signature: dict[tuple, dict] = {}
+    for c in conflicts:
+        if all(v["kind"] == "instruction" for v in c["variants"]):
+            sig = (c["section"], tuple(sorted((doc, substantive_key(v["text"]))
+                                              for v in c["variants"] for doc in v["docs"])))
+            first = by_signature.get(sig)
+            if first:
+                first["pathLabel"] = f"{first['pathLabel'] or 'section body'}, {c['pathLabel'] or 'section body'}"
+                continue
+            by_signature[sig] = c
+        merged.append(c)
+    conflicts = merged
     for i, c in enumerate(conflicts):
         c["id"] = i
 
@@ -885,7 +1167,8 @@ def redline_rows(dataset: dict):
     for c in dataset["conflicts"]:
         instr = " | ".join(f"{doc_tag(x['doc'])}: {x['text']}" for x in c["instructions"])
         base = {
-            "conflict_id": c["id"], "section": c["section"], "subsection": c["path"] or "(section body)",
+            "conflict_id": c["id"], "section": c["section"],
+            "subsection": c.get("pathLabel") or c["path"] or "(section body)",
             "section_title": c["title"], "variant_count": c["variantCount"],
             "elision": "yes" if c["hasElision"] else "", "instructions": instr,
         }
