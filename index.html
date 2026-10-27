@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RegDocDiff — Federal Register vs eCFR</title>
+<title>RuleCheck (Beta) — Comparison tool for FRNs, working documents, and existing regulations</title>
 <style>
   :root {
     --ink: #1a1a2e;
@@ -33,6 +33,11 @@
   header { background: var(--ink); color: var(--white); padding: 0 2rem; height: 56px; display: flex; align-items: center; gap: 1rem; flex-shrink: 0; }
   .logo { font-family: 'Georgia', serif; font-size: 1.25rem; font-weight: bold; letter-spacing: -0.02em; flex-shrink: 0; }
   .logo span { color: #7eb8e8; }
+  .beta-badge { font-family: sans-serif; font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #7eb8e8; border: 1px solid #7eb8e8; border-radius: 3px; padding: 0.05rem 0.35rem; margin-left: -0.5rem; flex-shrink: 0; }
+  .help-btn { display: inline-flex; align-items: center; gap: 0.4rem; flex-shrink: 0; font-family: sans-serif; font-size: 0.78rem; font-weight: 600; color: var(--white); text-decoration: none; border: 1px solid rgba(255,255,255,0.35); border-radius: 4px; padding: 0.35rem 0.7rem; transition: background 0.15s, border-color 0.15s; }
+  .help-btn:hover { background: rgba(255,255,255,0.1); border-color: #7eb8e8; }
+  .help-btn svg { width: 15px; height: 15px; }
+  .logo-check { width: 0.85em; height: 0.85em; margin: 0 0.12em; vertical-align: -0.05em; stroke: #7eb8e8; }
   .tagline { font-size: 0.78rem; color: var(--ink-faint); font-family: sans-serif; border-left: 1px solid #333; padding-left: 1rem; margin-left: 0.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* ── top-level navigation ── */
@@ -180,6 +185,8 @@
   .pair-picker .vs { font-style: italic; color: var(--ink-faint); }
   .pair-note { margin-left: auto; font-size: 0.75rem; color: var(--ink-faint); }
   .pair-note.same { color: var(--add); }
+  .ecfr-btn { font-family: sans-serif; font-size: 0.75rem; padding: 0.25rem 0.6rem; border: 1px solid var(--accent); border-radius: 4px; background: var(--white); color: var(--accent); cursor: pointer; }
+  .ecfr-btn:hover { background: var(--accent-light); }
 
   .redline-area .diff-col-label.current { color: var(--del); }
   .redline-area .diff-col-label.proposed { color: var(--add); }
@@ -237,6 +244,10 @@
     .diff-cell.current, .diff-col-label.current { border-right: none; border-bottom: 1px solid var(--border); }
     header { padding: 0 1rem; gap: 0.5rem; }
     .tagline { display: none; }
+    .help-label { display: none; }
+    .beta-badge { margin-left: 0; }
+    nav.tabs { flex-shrink: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+    .help-btn { padding: 0.35rem 0.45rem; }
     .tab { padding: 0 0.6rem; font-size: 0.75rem; }
     main { padding: 1rem; }
     .pair-note { margin-left: 0; }
@@ -246,13 +257,18 @@
 <body>
 
 <header>
-  <div class="logo">RegDoc<span>Diff</span></div>
-  <div class="tagline" id="tagline">Federal Register proposed rules vs. current eCFR text</div>
+  <div class="logo">Rule<svg class="logo-check" viewBox="0 0 16 16" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8.5l3.5 3.5 7.5-8"/></svg><span>Check</span></div>
+  <span class="beta-badge" title="Beta — results should be checked against the source documents">Beta</span>
+  <div class="tagline" id="tagline" title="Comparison tool for FRNs, working documents, and existing regulations">Comparison tool for FRNs, working documents, and existing regulations</div>
   <nav class="tabs">
     <button class="tab active" data-view="ecfr" type="button">eCFR Analysis</button>
     <button class="tab" data-view="compare" type="button">Document Comparison</button>
     <button class="tab" data-view="folder" type="button">Folder Comparison</button>
   </nav>
+  <a class="help-btn" href="mailto:jason.carneal@nrc.gov?subject=RuleCheck%20help" title="Email jason.carneal@nrc.gov for help">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.5"/><path d="M2.25 4.25 8 8.75l5.75-4.5"/></svg>
+    <span class="help-label">Contact for help</span>
+  </a>
 </header>
 
 <main>
@@ -260,10 +276,10 @@
   <!-- ═══ VIEW 1 — Federal Register document vs. current eCFR ═══════════ -->
   <section class="view active" id="view-ecfr">
     <div class="upload-area" id="uploadArea">
-      <input type="file" id="fileInput" accept=".html,.htm,.txt" />
+      <input type="file" id="fileInput" accept=".html,.htm,.txt,.docx,.pdf" />
       <div class="upload-icon">📄</div>
-      <h2>Drop a Federal Register document here</h2>
-      <p>Accepts .html or .txt files from regulations.gov · Extracts proposed amendments automatically</p>
+      <h2>Drop a Federal Register document or working draft here</h2>
+      <p>Accepts .html or .txt files from regulations.gov, or a .docx or .pdf working draft · Extracts proposed amendments automatically</p>
     </div>
 
     <div class="status-bar" id="statusBar">
@@ -305,7 +321,7 @@
       <input type="file" id="fldFileInput" accept=".json,application/json" />
       <div class="upload-icon">🗂️</div>
       <h2>Drop a folder-comparison dataset here</h2>
-      <p>Load the <code>regdocdiff-folder.json</code> written by <code>folder_compare.py</code></p>
+      <p>Load the <code>rulecheck-folder.json</code> written by <code>folder_compare.py</code></p>
     </div>
 
     <details class="fld-howto" id="fldHowto" open>
@@ -316,8 +332,8 @@
           <pre>python folder_compare.py "C:\path\to\folder"</pre>
           Add <code>--recursive</code> to include subfolders, or <code>-o</code> to choose where the results go.
         </li>
-        <li>It writes <code>regdocdiff-folder.json</code> (load it here), <code>regdocdiff-folder.csv</code>, and —
-          when <code>openpyxl</code> is installed — <code>regdocdiff-folder.xlsx</code> with real strikethrough redlines.</li>
+        <li>It writes <code>rulecheck-folder.json</code> (load it here), <code>rulecheck-folder.csv</code>, and —
+          when <code>openpyxl</code> is installed — <code>rulecheck-folder.xlsx</code> with real strikethrough redlines.</li>
       </ol>
     </details>
 
@@ -355,14 +371,16 @@
     Part, subpart and appendix headings, authority citations, footnotes, and any preamble or signature block are not
     regulation text and are left out. Differences only in punctuation, spacing, case, hyphenation or footnote markers
     don't count as changes; the redline itself is verbatim.
-    Files are read entirely in your browser — nothing is uploaded.
+    Pick <strong>eCFR</strong> in the redline picker (or <em>Compare with current eCFR</em>) to redline a draft against the same subsection of the current eCFR, fetched from the eCFR API when you ask; a draft that gives only an instruction has its “remove … and add …” edits applied to the eCFR text.
+    Files are read entirely in your browser — nothing is uploaded; only section numbers are sent to the eCFR.
   </div>
   <div class="footer-note" data-view="folder">
     <code>folder_compare.py</code> applies the same parsing, section-scoped matching and redline logic as Document
     Comparison to every <code>.docx</code> in a folder. A subsection is listed when two or more documents carry it with
     differing text; documents that share identical text are grouped into one variant, and each pair of variants is
     redlined. Text-vs-instruction differences are shown side by side, never redlined.
-    The dataset is read entirely in your browser — nothing is uploaded.
+    Pick <strong>eCFR</strong> in the redline picker (or <em>Compare with current eCFR</em>) to redline a draft against the same subsection of the current eCFR, fetched from the eCFR API when you ask; a draft that gives only an instruction has its “remove … and add …” edits applied to the eCFR text.
+    The dataset is read entirely in your browser — nothing is uploaded; only section numbers are sent to the eCFR.
   </div>
 </footer>
 
@@ -416,7 +434,6 @@ function parseAmendments(htmlText) {
   const lines = rawText.split('\n');
 
   const amendments = [];
-  const sectionRefRe = /(?:Sec\.|§)\s*(\d+\.\d+[\w.]*)/g;
 
   let current = null;
   let bodyLines = [];
@@ -452,12 +469,8 @@ function parseAmendments(htmlText) {
 
   function finalizeAmend() {
     if (!current) return;
-    current.proposedChunks = parseProposedChunks(bodyLines.join('\n'));
-    current.substitutions = current.proposedChunks.length
-      ? []
-      : parseSubstitutionInstruction(current.instruction);
-    const hasContent = current.proposedChunks.length || current.substitutions.length || current.sections.length;
-    if (hasContent) amendments.push(current);
+    const amend = finishAmendment(current, bodyLines.join('\n'));
+    if (amend) amendments.push(amend);
     current = null;
     bodyLines = [];
     inBody = false;
@@ -517,15 +530,7 @@ function parseAmendments(htmlText) {
       // Join with a single space (the FR wraps at ~72 chars with no hyphenation)
       const fullInstruction = instrLines.join(' ').replace(/\s+/g, ' ').trim();
 
-      // Extract section references and part from the FULL instruction
-      const sections = [];
-      let m;
-      sectionRefRe.lastIndex = 0;
-      while ((m = sectionRefRe.exec(fullInstruction)) !== null) sections.push(m[1]);
-      const partMatch = fullInstruction.match(/part\s+(\d+)/i);
-      const part = sections.length ? sections[0].split('.')[0] : (partMatch ? partMatch[1] : null);
-
-      current = { num: match[1], instruction: fullInstruction, sections, part };
+      current = { num: match[1], instruction: fullInstruction };
       inBody = false;
       i = j; // resume after the instruction lines
       continue;
@@ -540,6 +545,263 @@ function parseAmendments(htmlText) {
   }
   finalizeAmend();
   return amendments;
+}
+
+// Section references in an instruction: "Sec. 2.1", "§ 50.55a"
+const AMEND_SECTION_REF_RE = /(?:Sec\.|§)\s*(\d+\.\d+[\w.]*)/g;
+// "Sec. 55.41  Written examination: Operators." / "§ 52.21 Administrative …"
+const TITLED_SECTION_HEAD_RE = /^(?:Sec\.|§)\s*(\d+\.\d+[\w.]*)\s+[A-Z]/;
+
+function instructionSections(instruction) {
+  return [...instruction.matchAll(AMEND_SECTION_REF_RE)].map(m => m[1].replace(/\.+$/, ''));
+}
+
+// Complete an amendment { num, instruction } with its section references, part
+// and the proposed text that followed it. Returns null when there is nothing
+// to compare.
+function finishAmendment(amend, bodyText) {
+  const proposedChunks = parseProposedChunks(bodyText);
+  // An instruction that names no section ("The authority citation for part 52
+  // continues…") may still be followed by section text in an excerpted draft.
+  // Only a titled heading counts: an "[Amended]" marker belongs to the *next*
+  // instruction, and "Sec. 21.21(c) in order to…" is a wrapped reference.
+  let sections = instructionSections(amend.instruction);
+  if (!sections.length) {
+    sections = proposedChunks
+      .map(c => c.type === 'header' && c.text.match(TITLED_SECTION_HEAD_RE))
+      .filter(Boolean).map(m => m[1].replace(/\.+$/, ''));
+  }
+  const partMatch = amend.instruction.match(/part\s+(\d+)/i);
+  const part = sections.length ? sections[0].split('.')[0] : (partMatch ? partMatch[1] : null);
+  const substitutions = proposedChunks.length ? [] : parseSubstitutionInstruction(amend.instruction);
+  if (!proposedChunks.length && !substitutions.length && !sections.length) return null;
+  return { ...amend, sections, part, proposedChunks, substitutions };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Working drafts (.docx, .pdf) — same amendments, read paragraph by paragraph
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// A working draft carries the same instructions and amendatory text as the
+// Federal Register version, but each paragraph arrives whole rather than wrapped
+// at 72 characters, and the drafting conventions differ: "XX." placeholders or
+// Word list numbering instead of instruction numbers, "§" instead of "Sec.".
+// Instructions are recognised with the Document Comparison tab's rules
+// (readInstruction); the text after the section heading becomes the proposed
+// chunks exactly as for the .txt/.html path.
+
+function parseAmendmentParagraphs(paras) {
+  const amendments = [];
+  const [begin, end] = regulationSpan(paras);
+  let current = null;
+  let bodyLines = [];
+  let inBody = false;
+
+  function finalizeAmend() {
+    if (!current) return;
+    const amend = finishAmendment(current, bodyLines.join('\n'));
+    if (amend) amendments.push(amend);
+    current = null;
+    bodyLines = [];
+    inBody = false;
+  }
+
+  for (let i = begin; i < end; i++) {
+    const line = paras[i].trim();
+    if (!line) continue;
+
+    const instr = readInstruction(line);
+    if (instr) {
+      finalizeAmend();
+      current = { num: instr.num, instruction: line };
+      continue;
+    }
+    if (!current) continue;   // cover page, preamble
+
+    // Part and appendix headings, citations and footnotes are not proposed text.
+    if (PART_HEAD_RE.test(line) || APPENDIX_HEAD_RE.test(line)) { inBody = false; continue; }
+    if (EDITORIAL_RE.test(line) || FOOTNOTE_TEXT_RE.test(line)) continue;
+
+    // "a. Revise paragraph (b)…" on its own line still belongs to the instruction.
+    if (!bodyLines.length && SUBINSTR_RE.test(line)) {
+      current.instruction += ' ' + line;
+      continue;
+    }
+
+    // Section heading: "§ 50.55a …", or an unmarked "50.55a …" that the
+    // instruction names. Normalised to "§" so it becomes a header chunk.
+    let heading = SECTION_HEAD_RE.test(line) || /^Sec\.\s+\d+\.\d+/.test(line) ? line : null;
+    if (!heading) {
+      const m = line.match(DOTTED_HEAD_RE);
+      const number = m && m[1].replace(/\.+$/, '');
+      if (m && isBareSectionHeading(number, m[2].trim(), { refs: instructionSections(current.instruction) }, null)) {
+        heading = `§ ${number} ${m[2].trim()}`;
+      }
+    }
+    if (heading) {
+      inBody = true;
+      bodyLines.push(heading);
+      continue;
+    }
+    if (inBody) bodyLines.push(line);
+  }
+  finalizeAmend();
+  return amendments;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PDF — text lines → paragraphs
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// pdf.js (loaded from cdnjs the first time a PDF is opened) supplies positioned
+// text fragments. They are grouped into lines by baseline, running headers and
+// page numbers are dropped, and lines are joined into paragraphs using the
+// layout: a wider gap, a first-line indent, or a short previous line starts a
+// new paragraph, as does a designator, "§" heading or "* * *" after a line that
+// ends a sentence. A PDF prints the page as it looks, so a draft printed with
+// tracked changes showing will include the deleted text.
+
+const PDFJS_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+let pdfjsPromise = null;
+
+function loadPdfJs() {
+  if (!pdfjsPromise) {
+    pdfjsPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = PDFJS_BASE + 'pdf.min.js';
+      s.onload = () => {
+        const lib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
+        if (!lib) { reject(new Error('The PDF reader (pdf.js) did not load correctly.')); return; }
+        lib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'pdf.worker.min.js';
+        resolve(lib);
+      };
+      s.onerror = () => reject(new Error('Could not load the PDF reader (pdf.js) from cdnjs.cloudflare.com — check the internet connection.'));
+      document.head.appendChild(s);
+    }).catch(e => { pdfjsPromise = null; throw e; });
+  }
+  return pdfjsPromise;
+}
+
+// Text fragments of one page → lines, top to bottom:
+//   { text, x, right, y, size }
+function pdfPageLines(items) {
+  const frags = items
+    .filter(it => it.str && it.transform)
+    .map(it => {
+      const [a, b, , , x, y] = it.transform;
+      return { str: it.str, x, y, w: it.width || 0, size: Math.hypot(a, b) || it.height || 10 };
+    })
+    .sort((p, q) => q.y - p.y || p.x - q.x);
+
+  const lines = [];
+  for (const f of frags) {
+    const line = lines[lines.length - 1];
+    if (line && Math.abs(line.y - f.y) <= Math.max(line.size, f.size) * 0.4) line.frags.push(f);
+    else lines.push({ y: f.y, size: f.size, frags: [f] });
+  }
+
+  return lines.map(line => {
+    line.frags.sort((p, q) => p.x - q.x);
+    let text = '';
+    let prevEnd = null;
+    for (const f of line.frags) {
+      if (prevEnd !== null && f.x - prevEnd > line.size * 0.15 && !/\s$/.test(text) && !/^\s/.test(f.str)) text += ' ';
+      text += f.str;
+      prevEnd = f.x + f.w;
+    }
+    return {
+      text: text.replace(/ /g, ' ').replace(/\s+/g, ' ').trim(),
+      x: line.frags[0].x,
+      right: Math.max(...line.frags.map(f => f.x + f.w)),
+      y: line.y,
+      size: Math.max(...line.frags.map(f => f.size)),
+    };
+  }).filter(l => l.text);
+}
+
+// Drop running headers/footers: lines in the top or bottom two of a page that
+// repeat (ignoring numbers) on at least half the pages, and bare page numbers.
+const PAGE_NUMBER_RE = /^(?:page\s*)?#(?:\s*of\s*#)?$|^[-–—]\s*#\s*[-–—]$/i;
+
+function dropRunningHeads(pages) {
+  const key = l => l.text.replace(/\d+/g, '#').toLowerCase();
+  const edge = lines => new Set([...lines.slice(0, 2), ...lines.slice(-2)]);
+  const counts = new Map();
+  for (const lines of pages) {
+    for (const k of new Set([...edge(lines)].map(key))) counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  const repeated = Math.max(2, Math.ceil(pages.length / 2));
+  return pages.map(lines => {
+    const ends = edge(lines);
+    return lines.filter(l => !ends.has(l)
+      || !(PAGE_NUMBER_RE.test(key(l)) || (pages.length > 2 && counts.get(key(l)) >= repeated)));
+  });
+}
+
+// A line that opens a structural element when the previous line ended a sentence.
+const PDF_BLOCK_START_RE = /^(?:\([a-zA-Z0-9]{1,5}\)|§|\*\s*\*\s*\*|(?:\d{1,3}|X{1,3}|x{2,3}|[a-z])\.\s|PART\s+\d|Subpart\s|Appendix\s)/;
+
+function pdfLinesToParagraphs(pages) {
+  const all = pages.flatMap((lines, page) => lines.map(l => ({ ...l, page })));
+  if (!all.length) return [];
+
+  // Typical line pitch, and the right edge a full line reaches.
+  const gaps = [];
+  for (let i = 1; i < all.length; i++) {
+    const a = all[i - 1], b = all[i];
+    const d = a.y - b.y;
+    if (a.page === b.page && d > 0 && d < a.size * 3) gaps.push(d);
+  }
+  gaps.sort((a, b) => a - b);
+  const spacing = gaps.length ? gaps[Math.floor(gaps.length / 2)] : null;
+  const rights = all.map(l => l.right).sort((a, b) => a - b);
+  const rightMargin = rights[Math.floor(rights.length * 0.9)];
+  // Left edge of continuation lines: the most common line start.
+  const starts = new Map();
+  for (const l of all) starts.set(Math.round(l.x), (starts.get(Math.round(l.x)) || 0) + 1);
+  const bodyLeft = [...starts].sort((a, b) => b[1] - a[1])[0][0];
+
+  const paras = [];
+  let cur = null;
+  for (let i = 0; i < all.length; i++) {
+    const l = all[i];
+    const prev = all[i - 1];
+    let fresh = cur === null || (prev.page === l.page && spacing && prev.y - l.y > spacing * 1.35);
+    if (!fresh) {
+      // A paragraph can only end where a sentence or list item ends.
+      const ended = /[.:;!?\]]["”’)]?$|\*$|[—–-]$|;\s+(?:and|or)$/.test(prev.text);
+      // The previous line stopped well short: this line's first word would have
+      // fitted with room to spare (non-breaking spaces make Word wrap early).
+      const short = prev.right + (l.text.split(' ')[0].length + 4) * l.size * 0.5 < rightMargin;
+      const indented = l.x > prev.x + l.size * 0.8 || l.x > bodyLeft + l.size * 0.8;
+      const block = PDF_BLOCK_START_RE.test(l.text);
+      // After a line that ends mid-sentence, a designator at the left margin is
+      // usually a wrapped reference ("paragraphs / (a)(1) and (a)(2)"); only a
+      // line that stops far short (an unpunctuated heading) ends there.
+      fresh = ended
+        ? (indented || short || block)
+        : (short && (indented || (block && prev.right < rightMargin - l.size * 8)));
+    }
+    if (fresh) {
+      if (cur !== null) paras.push(cur);
+      cur = l.text;
+    } else {
+      cur += /-$/.test(cur) ? l.text : ' ' + l.text;
+    }
+  }
+  if (cur !== null) paras.push(cur);
+  return paras;
+}
+
+async function readPdfParagraphs(file) {
+  const pdfjsLib = await loadPdfJs();
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const pages = [];
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const page = await pdf.getPage(n);
+    pages.push(pdfPageLines((await page.getTextContent()).items));
+  }
+  return pdfLinesToParagraphs(dropRunningHeads(pages));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -932,13 +1194,16 @@ function title10Note(info) {
 
 // Returns a paragraph map: label → text, plus a special '_full_' key with raw text.
 // Labels match paragraph designators like "(a)", "(b)(2)", etc.
-async function fetchEcfrParagraphMap(part, section) {
+async function fetchEcfrSectionXml(part, section) {
   const date = await getTitle10Date();
-  const url = `https://www.ecfr.gov/api/versioner/v1/full/${date}/title-10.xml?part=${part}&section=${section}`;
+  const r = await fetch(`https://www.ecfr.gov/api/versioner/v1/full/${date}/title-10.xml?part=${part}&section=${section}`);
+  if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
+  return r.text();
+}
+
+async function fetchEcfrParagraphMap(part, section) {
   try {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const xml = await r.text();
+    const xml = await fetchEcfrSectionXml(part, section);
     return parseXmlIntoParagraphMap(xml, section);
   } catch(e) {
     console.warn(`eCFR fetch failed §${section}:`, e.message);
@@ -1163,7 +1428,7 @@ function renderDiffRows(rows, leftLabel = 'Current eCFR text', rightLabel = 'Pro
 function renderAmendments(amendments) {
   const container = document.getElementById('results');
   if (!amendments.length) {
-    container.innerHTML = `<div class="empty-state"><div class="icon">🔍</div>No numbered amendment instructions found.<br>Make sure you've uploaded a Federal Register proposed or final rule.</div>`;
+    container.innerHTML = `<div class="empty-state"><div class="icon">🔍</div>No amendment instructions found.<br>Make sure you've uploaded a Federal Register proposed or final rule, or a working draft of one.</div>`;
     return;
   }
 
@@ -1245,7 +1510,7 @@ function renderAmendments(amendments) {
 
     card.innerHTML = `
       <div class="amendment-card-header">
-        <span class="amend-num">#${amend.num}</span>
+        <span class="amend-num">${amend.num ? '#' + esc(amend.num) : '—'}</span>
         <span class="amend-title">${esc(trunc(amend.instruction, 90))}</span>
         ${sectionLabel ? `<span class="amend-cfr">${esc(sectionLabel)}</span>` : ''}
         <span class="amend-toggle">▼</span>
@@ -1403,10 +1668,26 @@ async function loadSubstitutionDiff(amend, area) {
 
 async function handleFile(file) {
   setStatus('⏳', 'Reading file…', file.name);
-  const text = await file.text();
-  setStatus('🔍', 'Parsing amendments…', 'Scanning for numbered amendment instructions');
-  await new Promise(r => setTimeout(r, 60));
-  const amendments = parseAmendments(text);
+  const ext = (file.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+  let amendments;
+  try {
+    if (ext === '.docx' || ext === '.pdf') {
+      const paras = ext === '.docx' ? await readDocxParagraphs(file) : await readPdfParagraphs(file);
+      setStatus('🔍', 'Parsing amendments…', 'Scanning for amendment instructions');
+      await new Promise(r => setTimeout(r, 60));
+      amendments = parseAmendmentParagraphs(paras);
+    } else {
+      const text = await file.text();
+      setStatus('🔍', 'Parsing amendments…', 'Scanning for numbered amendment instructions');
+      await new Promise(r => setTimeout(r, 60));
+      amendments = parseAmendments(text);
+    }
+  } catch (e) {
+    console.error(e);
+    document.getElementById('results').innerHTML = '';
+    setStatus('⚠️', `Could not read ${file.name}`, e.message);
+    return;
+  }
   document.getElementById('results').innerHTML = '';
   setStatus('✅',
     `Found ${amendments.length} amendment${amendments.length !== 1 ? 's' : ''}`,
@@ -2454,6 +2735,184 @@ function diffParagraphBlocks(aText, bText) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Current eCFR text as a redline side (Document and Folder Comparison)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The eCFR section is read with the drafts' own parser (parseAmendmentDoc), so
+// its paragraphs are keyed exactly like theirs — nested designators resolved,
+// definitions by term — and a draft subsection is compared with the same
+// subsection of the current rule. Sections are fetched when first asked for.
+
+const ECFR_SIDE = 'ecfr';
+const ecfrUnitCache = new Map();   // section → Promise<units Map>
+
+// eCFR section XML → plain paragraphs, led by a "§ N Title" heading (the
+// title tells the parser whether this is a definitions section).
+//
+// The eCFR prints a headed paragraph and its first child as one paragraph —
+// "(c) <I>Filings after the deadline.</I> (1) Hearing requests …" — where
+// drafts put "(1)" on its own line. Split those so "(i)" below resolves to
+// (c)(1)(i) on both sides.
+const ECFR_CHILD_START_RE = /^\((?:[a-z]{1,4}|\d{1,3}|[A-Z])\)\s/;
+
+function ecfrSectionParagraphs(xmlText, section) {
+  const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
+  if (doc.querySelector('parsererror')) return null;
+  const clean = s => s.replace(/\s+/g, ' ').trim();
+  const head = doc.querySelector('HEAD') || doc.querySelector('SUBJECT');
+  const title = head ? clean(head.textContent).replace(/^§+\s*[\d.]+[A-Za-z]*\s*/, '') : '';
+  const paras = [`§ ${section} ${title}`.trim()];
+
+  for (const p of doc.querySelectorAll('P, FP, FP-1, FP-2, FPTEXT')) {
+    if (p.closest('NOTE, FTNT, EDNOTE, CITA, AUTH, SOURCE')) continue;
+    // Text up to the end of the paragraph's italic heading, and the rest.
+    let lead = '', rest = '', past = false;
+    for (const n of p.childNodes) {
+      if (past) { rest += n.textContent; continue; }
+      lead += n.textContent;
+      if (n.nodeType === 1 && /^(?:E|I)$/.test(n.nodeName)) past = true;
+    }
+    const child = clean(rest).replace(/^[—–:.-]\s*/, '');   // "Heading—(1) …"
+    if (past && /^\s*(?:\([A-Za-z0-9]+\))+\s*\S/.test(lead) && ECFR_CHILD_START_RE.test(child)) {
+      paras.push(clean(lead), child);
+    } else {
+      const t = clean(p.textContent);
+      if (t) paras.push(t);
+    }
+  }
+  return paras;
+}
+
+function ecfrSectionUnits(section) {
+  let p = ecfrUnitCache.get(section);
+  if (!p) {
+    p = fetchEcfrSectionXml(section.split('.')[0], section).then(xml => {
+      const paras = ecfrSectionParagraphs(xml, section);
+      if (!paras) throw new Error('the eCFR returned unreadable XML');
+      return parseAmendmentDoc(paras).units;
+    });
+    p.catch(() => ecfrUnitCache.delete(section));   // let a later click retry
+    ecfrUnitCache.set(section, p);
+  }
+  return p;
+}
+
+// Apply an instruction's "remove X and add Y" edits to the eCFR text of the
+// paragraph at `path`. Strict: null unless every edit aimed at this paragraph
+// finds its phrase, so a redline is never built on a guess.
+function applyInstructionToEcfr(ecfrText, instruction, path) {
+  const subs = parseSubstitutionInstruction(instruction)
+    .filter(s => !s.para || (s.paras || [s.para]).includes(path));
+  if (!subs.length) return null;
+  let text = ecfrText;
+  for (const { ops, wherever } of subs) {
+    for (const op of ops) {
+      if (!op.remove) return null;            // add-only: position unknown
+      const re = new RegExp(escapeRegex(op.remove), wherever ? 'gi' : 'i');
+      if (!re.test(text)) return null;
+      text = text.replace(re, op.add);
+    }
+  }
+  return text === ecfrText ? null : text;
+}
+
+// Redline one draft's subsection against the current eCFR.
+//   draft     { text, kind, hasElision, label }
+//   ecfrRight eCFR on the right instead of the left
+//   isCurrent false once the card has redrawn, so a slow fetch can't overwrite
+async function drawEcfrRedline(area, note, section, path, pathLabel, draft, ecfrRight, isCurrent) {
+  note.className = 'pair-note';
+  note.textContent = '';
+  area.innerHTML = `<div class="loading-ecfr"><div class="spinner"></div>Fetching current eCFR text for § ${esc(section)}…</div>`;
+
+  let units;
+  try {
+    units = await ecfrSectionUnits(section);
+  } catch (e) {
+    if (!isCurrent()) return;
+    note.textContent = 'not in eCFR';
+    area.innerHTML = `<div class="ecfr-error">⚠ ${e.status === 404
+      ? `§ ${esc(section)} is not in the current eCFR — the drafts may be adding it.`
+      : `Could not retrieve § ${esc(section)} from the eCFR (${esc(e.message)}).`}</div>`;
+    return;
+  }
+  const date = await getTitle10Date();
+  if (!isCurrent()) return;
+
+  const where = `§ ${section}${pathLabel ? ' ' + pathLabel : ''}`;
+  const link = `<a href="https://www.ecfr.gov/current/title-10/part-${esc(section.split('.')[0])}/section-${esc(section)}" target="_blank">§ ${esc(section)} on eCFR ↗</a>`;
+  const ecfrLabel = `Current eCFR (as of ${date})`;
+  let unit = units.get(`${section}|${path}`);
+  // A draft that keeps "(a) Heading—(1) Text …" on one line is compared with
+  // the eCFR heading and its first child joined the same way.
+  const inline = unit && draft.text.match(/^[^()\n]*?[—–.:-]\s*\(([a-zA-Z0-9]+)\)\s/);
+  const child = inline && units.get(`${section}|${path}(${inline[1]})`);
+  if (child) unit = { ...unit, text: `${unit.text}—(${inline[1]}) ${child.text}` };
+  const show = (rows, draftLabel) => renderDiffRows(rows,
+    ecfrRight ? draftLabel : ecfrLabel, ecfrRight ? ecfrLabel : draftLabel);
+  const redline = (ecfrText, draftText) => ecfrRight
+    ? diffParagraphBlocks(draftText, ecfrText) : diffParagraphBlocks(ecfrText, draftText);
+  const sideBySide = (ecfrText, draftText) => [{
+    type: 'diff', label: '',
+    oldHtml: esc(ecfrRight ? draftText : ecfrText), newHtml: esc(ecfrRight ? ecfrText : draftText),
+  }];
+
+  if (!unit) {
+    note.textContent = 'not in eCFR';
+    area.innerHTML = `<div class="docx-note">${esc(where)} has no counterpart in the current eCFR — the draft adds it, or numbers it differently. ${link}</div>`
+      + show(sideBySide('', draft.text), draft.label);
+    return;
+  }
+
+  if (draft.kind === 'instruction') {
+    const amended = applyInstructionToEcfr(unit.text, draft.text, path);
+    if (amended !== null) {
+      note.textContent = 'instruction applied to eCFR text';
+      area.innerHTML = `<div class="docx-note">This draft gives only the amendment instruction; its edits are applied to the current eCFR text below. ${link}</div>`
+        + show(redline(unit.text, amended), `${draft.label} — instruction applied`);
+    } else {
+      note.textContent = 'different forms';
+      area.innerHTML = `<div class="docx-note">⚠ This draft gives only the amendment instruction, and its edits could not be applied to the eCFR text automatically, so the two are shown side by side. ${link}</div>`
+        + show(sideBySide(unit.text, draft.text), `${draft.label} — instruction only`);
+    }
+    return;
+  }
+
+  if (substantiveKey(unit.text) === substantiveKey(draft.text)) {
+    note.className = 'pair-note same';
+    note.textContent = 'Matches eCFR';
+    area.innerHTML = `<div class="docx-note">✅ This draft's text for ${esc(where)} is the same as the current eCFR. ${link}</div>`;
+    return;
+  }
+
+  note.textContent = `${Math.round(similarity(unit.text, draft.text) * 100)}% alike`;
+  const elided = draft.hasElision
+    ? `<div class="docx-note">⋯ The draft elides part of this subsection with <code>* * *</code>; that text is unchanged but will show as missing from the draft below.</div>`
+    : '';
+  area.innerHTML = elided + show(redline(unit.text, draft.text), draft.label)
+    + `<div class="docx-note">${link}</div>`;
+}
+
+// Add the eCFR choice to a card's pair picker and a one-click shortcut to it.
+function addEcfrChoice(card, section, selA, selB, draw) {
+  const opt = `<option value="${ECFR_SIDE}">eCFR · current § ${esc(section)}</option>`;
+  selA.insertAdjacentHTML('afterbegin', opt);
+  selB.insertAdjacentHTML('afterbegin', opt);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ecfr-btn';
+  btn.textContent = 'Compare with current eCFR';
+  // Keep the left-hand draft and move the eCFR in beside it, on the left.
+  btn.addEventListener('click', () => {
+    const keep = [selA.value, selB.value].find(v => v !== ECFR_SIDE) ?? selA.options[1].value;
+    selA.value = ECFR_SIDE;
+    selB.value = keep;
+    draw();
+  });
+  card.querySelector('.pair-picker .vs').nextElementSibling.after(btn);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Comparison view — state and rendering
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2756,9 +3215,29 @@ function buildConflictCard(conflict, allDocs) {
   const area = card.querySelector('.redline-area');
   const note = card.querySelector('.pair-note');
 
+  let drawSeq = 0;
   function draw() {
+    const seq = ++drawSeq;
+    if (selA.value === ECFR_SIDE || selB.value === ECFR_SIDE) {
+      if (selA.value === selB.value) {
+        note.className = 'pair-note';
+        note.textContent = '';
+        area.innerHTML = `<div class="docx-note">Pick a document to compare with the current eCFR.</div>`;
+        return;
+      }
+      const ecfrRight = selB.value === ECFR_SIDE;
+      const e = conflict.entries[Number(ecfrRight ? selA.value : selB.value)];
+      drawEcfrRedline(area, note, conflict.section, e.unit.path, e.unit.pathLabel || e.unit.path, {
+        text: e.unit.text, kind: e.unit.kind, hasElision: e.unit.hasElision,
+        label: `${e.doc.tag} — ${trunc(e.doc.name, 46)}`,
+      }, ecfrRight, () => seq === drawSeq);
+      return;
+    }
+
     const a = conflict.entries[Number(selA.value)];
     const b = conflict.entries[Number(selB.value)];
+    note.className = 'pair-note';
+    note.textContent = '';
 
     if (a === b) {
       note.className = 'pair-note';
@@ -2805,6 +3284,7 @@ function buildConflictCard(conflict, allDocs) {
     );
   }
 
+  addEcfrChoice(card, conflict.section, selA, selB, draw);
   selA.addEventListener('change', draw);
   selB.addEventListener('change', draw);
   card.querySelector('.pair-picker').addEventListener('click', e => e.stopPropagation());
@@ -2845,7 +3325,7 @@ cua.addEventListener('drop', e => {
 //   { t: 'omit', n }                  — n unchanged paragraphs
 //   { t: 'diff', ops: [[op, text]] }  — op "=" unchanged, "-" deleted, "+" inserted
 
-const FLD_SCHEMA = 'regdiff-folder/1';   // format id; kept from the RegDiff name so existing datasets still load
+const FLD_SCHEMA = 'regdiff-folder/1';   // format id; kept from the original RegDiff name so existing datasets still load
 const FLD_PAGE = 50;
 
 let fld = null;
@@ -3170,11 +3650,27 @@ function buildFolderCard(c) {
   const area = card.querySelector('.redline-area');
   const note = card.querySelector('.pair-note');
 
+  let drawSeq = 0;
   function draw() {
-    const ia = Number(selA.value), ib = Number(selB.value);
-    const va = c.variants[ia], vb = c.variants[ib];
+    const seq = ++drawSeq;
     note.className = 'pair-note';
     note.textContent = '';
+    if (selA.value === ECFR_SIDE || selB.value === ECFR_SIDE) {
+      if (selA.value === selB.value) {
+        area.innerHTML = `<div class="docx-note">Pick a variant to compare with the current eCFR.</div>`;
+        return;
+      }
+      const ecfrRight = selB.value === ECFR_SIDE;
+      const vi = Number(ecfrRight ? selA.value : selB.value);
+      const v = c.variants[vi];
+      drawEcfrRedline(area, note, c.section, c.path, c.pathLabel || c.path, {
+        text: v.text, kind: v.kind, hasElision: v.hasElision, label: fldVariantLabel(c, vi),
+      }, ecfrRight, () => seq === drawSeq);
+      return;
+    }
+
+    const ia = Number(selA.value), ib = Number(selB.value);
+    const va = c.variants[ia], vb = c.variants[ib];
 
     if (ia === ib) {
       area.innerHTML = `<div class="docx-note">Pick two different variants to see a redline.</div>`;
@@ -3214,6 +3710,7 @@ function buildFolderCard(c) {
       fldVariantLabel(c, ib));
   }
 
+  addEcfrChoice(card, c.section, selA, selB, draw);
   selA.addEventListener('change', draw);
   selB.addEventListener('change', draw);
   card.querySelector('.pair-picker').addEventListener('click', e => e.stopPropagation());
@@ -3247,18 +3744,13 @@ fua.addEventListener('drop', e => {
 // Top-level navigation
 // ═════════════════════════════════════════════════════════════════════════════
 
-const TAGLINES = {
-  ecfr: 'Federal Register proposed rules vs. current eCFR text',
-  compare: 'Cross-document section conflicts across multiple .docx files',
-  folder: 'Conflicts across a whole folder of .docx files, from folder_compare.py',
-};
+const VIEWS = ['ecfr', 'compare', 'folder'];
 
 function switchView(view) {
-  if (!TAGLINES[view]) view = 'ecfr';
+  if (!VIEWS.includes(view)) view = 'ecfr';
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === `view-${view}`));
   document.querySelectorAll('.footer-note').forEach(f => f.classList.toggle('active', f.dataset.view === view));
-  document.getElementById('tagline').textContent = TAGLINES[view];
 }
 
 document.querySelectorAll('.tab').forEach(tab => {

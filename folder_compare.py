@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-folder_compare.py — RegDocDiff folder comparison.
+folder_compare.py — RuleCheck folder comparison.
 
 Analyzes every .docx amendment document in a folder using the same logic as the
 "Document Comparison" tab of index.html, and writes a dataset of every
 conflicting subsection with its redline:
 
-    regdocdiff-folder.json   load into the "Folder Comparison" tab of index.html
-    regdocdiff-folder.csv    one row per redline, [-deleted-] {+inserted+} markup
-    regdocdiff-folder.xlsx   same rows, with real red strikethrough / green underline
+    rulecheck-folder.json    load into the "Folder Comparison" tab of index.html
+    rulecheck-folder.csv     one row per redline, [-deleted-] {+inserted+} markup
+    rulecheck-folder.xlsx    same rows, with real red strikethrough / green underline
                           (written when openpyxl is installed)
 
 Usage:
@@ -43,7 +43,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-SCHEMA = "regdiff-folder/1"      # format id; kept from the RegDiff name so existing datasets still load
+SCHEMA = "regdiff-folder/1"      # format id; kept from the original RegDiff name so existing datasets still load
 
 # ─────────────────────────────────────────────────────────────────────────────
 # JavaScript-compatible regex building blocks
@@ -276,7 +276,7 @@ def default_cache_dir() -> Path:
 
 
 def _get_json(url: str, timeout: int = 60):
-    req = urllib.request.Request(url, headers={"User-Agent": "regdocdiff-folder-compare/1",
+    req = urllib.request.Request(url, headers={"User-Agent": "rulecheck-folder-compare/1",
                                                "Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.load(r)
@@ -1329,7 +1329,7 @@ def main(argv=None) -> int:
                     "dataset of conflicting subsections with redlines.")
     ap.add_argument("folder", type=Path, help="folder containing .docx files")
     ap.add_argument("-o", "--out-dir", type=Path, help="where to write outputs (default: the folder)")
-    ap.add_argument("--name", default="regdocdiff-folder", help="output file base name")
+    ap.add_argument("--name", default="rulecheck-folder", help="output file base name")
     ap.add_argument("-r", "--recursive", action="store_true", help="include subfolders")
     ap.add_argument("--no-csv", action="store_true", help="skip the .csv output")
     ap.add_argument("--no-xlsx", action="store_true", help="skip the .xlsx output")
