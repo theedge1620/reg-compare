@@ -22,7 +22,8 @@ Title 10 sections (fetched once per eCFR update and cached), so quantities such
 as "0.001 rem" are not mistaken for section headings. Use --no-ecfr to skip it.
 
 Parity note: the parsing, conflict detection and redline algorithms below are a
-line-for-line port of the JavaScript in index.html. Regular expressions are
+line-for-line port of the page's JavaScript (js/docx-reader.js, js/amendment-parser.js,
+js/conflicts.js, js/diff.js and the Title 10 list in js/ecfr-api.js). Regular expressions are
 written to reproduce JavaScript semantics (ASCII \\d, \\w and \\b; Unicode \\s),
 so the same document yields the same units in both. If you change one, change
 the other.
