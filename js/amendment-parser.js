@@ -125,6 +125,7 @@ function instructionSectionRefs(text) {
 
 const ROMAN_RE = /^[ivxlcdm]+$/;
 const ROMAN_SUCCESSOR = { i: 'ii', v: 'vi', x: 'xi' };
+const ROMAN_PREDECESSOR = { v: 'iv', x: 'ix' };
 
 function designatorLevel(token, stack, nextToken) {
   if (/^\d+$/.test(token)) return 2;                    // (1)
@@ -133,6 +134,11 @@ function designatorLevel(token, stack, nextToken) {
     if (!'ivx'.includes(token)) return 1;               // unambiguous letter
 
     // ── ambiguous: (i) / (v) / (x) ──
+    // "(iv)" then "(v)": the roman run continues, even when "(2)" follows —
+    // unless a "(u)" letter run makes it just as likely a letter.
+    const romanPrev = ROMAN_PREDECESSOR[token];
+    if (romanPrev && stack[2] === `(${romanPrev})`
+        && stack[0] !== `(${String.fromCharCode(token.charCodeAt(0) - 1)})`) return 3;
     if (nextToken) {
       // "(i)" then "(1)": digits are level 2, so (i) must be the level-1 parent.
       if (/^\d+$/.test(nextToken)) return 1;

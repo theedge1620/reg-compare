@@ -114,6 +114,7 @@ DIFF_TOKEN_RE = re.compile("(" + NS + "+|" + S + "+)")
 SIM_TOKEN_RE = re.compile(r"[A-Za-z0-9_'-]+")
 
 ROMAN_SUCCESSOR = {"i": "ii", "v": "vi", "x": "xi"}
+ROMAN_PREDECESSOR = {"v": "iv", "x": "ix"}
 
 
 def js_trim(s: str) -> str:
@@ -346,6 +347,12 @@ def designator_level(token: str, stack: list[str], next_token: str | None) -> in
     if re.fullmatch(r"[a-z]", token):
         if token not in "ivx":
             return 1
+        # "(iv)" then "(v)": the roman run continues, even when "(2)" follows —
+        # unless a "(u)" letter run makes it just as likely a letter.
+        roman_prev = ROMAN_PREDECESSOR.get(token)
+        if (roman_prev and len(stack) > 2 and stack[2] == f"({roman_prev})"
+                and stack[0] != f"({chr(ord(token) - 1)})"):
+            return 3
         if next_token:
             if re.fullmatch(r"[0-9]+", next_token):
                 return 1

@@ -4,7 +4,7 @@
 // Top-level navigation
 // ═════════════════════════════════════════════════════════════════════════════
 
-const VIEWS = ['ecfr', 'compare', 'folder'];
+const VIEWS = ['ecfr', 'compare', 'folder', 'icr'];
 
 function switchView(view) {
   if (!VIEWS.includes(view)) view = 'ecfr';

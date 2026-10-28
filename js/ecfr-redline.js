@@ -82,6 +82,85 @@ function applyInstructionToEcfr(ecfrText, instruction, path) {
   return text === ecfrText ? null : text;
 }
 
+// Compare one draft subsection with the same subsection of a reference text
+// (the current eCFR, or the regulation library on the Info Collections tab).
+//   units  the reference section parsed by parseAmendmentDoc
+//   draft  { text, kind, hasElision, label }
+// Returns { status, refText, draftText, sim } where status is
+//   'missing'     no counterpart in the reference (new, or renumbered)
+//   'same'        substantively identical
+//   'changed'     differs — redline refText → draftText
+//   'applied'     an instruction whose edits applied cleanly; draftText is the result
+//   'instruction' an instruction whose edits could not be applied
+function compareWithReference(units, section, path, draft) {
+  let unit = units.get(`${section}|${path}`);
+  // A draft that keeps "(a) Heading—(1) Text …" on one line is compared with
+  // the reference heading and its first child joined the same way.
+  const inline = unit && draft.text.match(/^[^()\n]*?[—–.:-]\s*\(([a-zA-Z0-9]+)\)\s/);
+  const child = inline && units.get(`${section}|${path}(${inline[1]})`);
+  if (child) unit = { ...unit, text: `${unit.text}—(${inline[1]}) ${child.text}` };
+
+  if (!unit) return { status: 'missing', refText: '', draftText: draft.text, sim: null };
+  if (draft.kind === 'instruction') {
+    const amended = applyInstructionToEcfr(unit.text, draft.text, path);
+    return amended !== null
+      ? { status: 'applied', refText: unit.text, draftText: amended, sim: similarity(unit.text, amended) }
+      : { status: 'instruction', refText: unit.text, draftText: draft.text, sim: null };
+  }
+  if (substantiveKey(unit.text) === substantiveKey(draft.text)) {
+    return { status: 'same', refText: unit.text, draftText: draft.text, sim: 1 };
+  }
+  return { status: 'changed', refText: unit.text, draftText: draft.text, sim: similarity(unit.text, draft.text) };
+}
+
+// Draw a compareWithReference() result.
+//   ref       { short: 'eCFR', name: 'the current eCFR', label, link }
+//   refRight  reference on the right instead of the left
+function renderReferenceComparison(area, note, cmp, ref, where, draft, refRight) {
+  const show = (rows, draftLabel) => renderDiffRows(rows,
+    refRight ? draftLabel : ref.label, refRight ? ref.label : draftLabel);
+  const redline = (refText, draftText) => refRight
+    ? diffParagraphBlocks(draftText, refText) : diffParagraphBlocks(refText, draftText);
+  const sideBySide = (refText, draftText) => [{
+    type: 'diff', label: '',
+    oldHtml: esc(refRight ? draftText : refText), newHtml: esc(refRight ? refText : draftText),
+  }];
+  note.className = 'pair-note';
+
+  switch (cmp.status) {
+    case 'missing':
+      note.textContent = `not in ${ref.short}`;
+      area.innerHTML = `<div class="docx-note">${esc(where)} has no counterpart in ${esc(ref.name)} — the draft adds it, or numbers it differently. ${ref.link}</div>`
+        + show(sideBySide('', cmp.draftText), draft.label);
+      return;
+    case 'applied':
+      note.textContent = `instruction applied to ${ref.short} text`;
+      area.innerHTML = `<div class="docx-note">This draft gives only the amendment instruction; its edits are applied to ${esc(ref.name)} text below. ${ref.link}</div>`
+        + show(redline(cmp.refText, cmp.draftText), `${draft.label} — instruction applied`);
+      return;
+    case 'instruction':
+      note.textContent = 'different forms';
+      area.innerHTML = `<div class="docx-note">⚠ This draft gives only the amendment instruction, and its edits could not be applied to ${esc(ref.name)} text automatically, so the two are shown side by side. ${ref.link}</div>`
+        + show(sideBySide(cmp.refText, cmp.draftText), `${draft.label} — instruction only`);
+      return;
+    case 'same':
+      note.className = 'pair-note same';
+      note.textContent = `Matches ${ref.short}`;
+      area.innerHTML = `<div class="docx-note">✅ This draft's text for ${esc(where)} is the same as ${esc(ref.name)}. ${ref.link}</div>`;
+      return;
+  }
+  note.textContent = `${Math.round(cmp.sim * 100)}% alike`;
+  const elided = draft.hasElision
+    ? `<div class="docx-note">⋯ The draft elides part of this subsection with <code>* * *</code>; that text is unchanged but will show as missing from the draft below.</div>`
+    : '';
+  area.innerHTML = elided + show(redline(cmp.refText, cmp.draftText), draft.label)
+    + `<div class="docx-note">${ref.link}</div>`;
+}
+
+function ecfrLink(section) {
+  return `<a href="https://www.ecfr.gov/current/title-10/part-${esc(section.split('.')[0])}/section-${esc(section)}" target="_blank">§ ${esc(section)} on eCFR ↗</a>`;
+}
+
 // Redline one draft's subsection against the current eCFR.
 //   draft     { text, kind, hasElision, label }
 //   ecfrRight eCFR on the right instead of the left
@@ -105,58 +184,9 @@ async function drawEcfrRedline(area, note, section, path, pathLabel, draft, ecfr
   const date = await getTitle10Date();
   if (!isCurrent()) return;
 
-  const where = `§ ${section}${pathLabel ? ' ' + pathLabel : ''}`;
-  const link = `<a href="https://www.ecfr.gov/current/title-10/part-${esc(section.split('.')[0])}/section-${esc(section)}" target="_blank">§ ${esc(section)} on eCFR ↗</a>`;
-  const ecfrLabel = `Current eCFR (as of ${date})`;
-  let unit = units.get(`${section}|${path}`);
-  // A draft that keeps "(a) Heading—(1) Text …" on one line is compared with
-  // the eCFR heading and its first child joined the same way.
-  const inline = unit && draft.text.match(/^[^()\n]*?[—–.:-]\s*\(([a-zA-Z0-9]+)\)\s/);
-  const child = inline && units.get(`${section}|${path}(${inline[1]})`);
-  if (child) unit = { ...unit, text: `${unit.text}—(${inline[1]}) ${child.text}` };
-  const show = (rows, draftLabel) => renderDiffRows(rows,
-    ecfrRight ? draftLabel : ecfrLabel, ecfrRight ? ecfrLabel : draftLabel);
-  const redline = (ecfrText, draftText) => ecfrRight
-    ? diffParagraphBlocks(draftText, ecfrText) : diffParagraphBlocks(ecfrText, draftText);
-  const sideBySide = (ecfrText, draftText) => [{
-    type: 'diff', label: '',
-    oldHtml: esc(ecfrRight ? draftText : ecfrText), newHtml: esc(ecfrRight ? ecfrText : draftText),
-  }];
-
-  if (!unit) {
-    note.textContent = 'not in eCFR';
-    area.innerHTML = `<div class="docx-note">${esc(where)} has no counterpart in the current eCFR — the draft adds it, or numbers it differently. ${link}</div>`
-      + show(sideBySide('', draft.text), draft.label);
-    return;
-  }
-
-  if (draft.kind === 'instruction') {
-    const amended = applyInstructionToEcfr(unit.text, draft.text, path);
-    if (amended !== null) {
-      note.textContent = 'instruction applied to eCFR text';
-      area.innerHTML = `<div class="docx-note">This draft gives only the amendment instruction; its edits are applied to the current eCFR text below. ${link}</div>`
-        + show(redline(unit.text, amended), `${draft.label} — instruction applied`);
-    } else {
-      note.textContent = 'different forms';
-      area.innerHTML = `<div class="docx-note">⚠ This draft gives only the amendment instruction, and its edits could not be applied to the eCFR text automatically, so the two are shown side by side. ${link}</div>`
-        + show(sideBySide(unit.text, draft.text), `${draft.label} — instruction only`);
-    }
-    return;
-  }
-
-  if (substantiveKey(unit.text) === substantiveKey(draft.text)) {
-    note.className = 'pair-note same';
-    note.textContent = 'Matches eCFR';
-    area.innerHTML = `<div class="docx-note">✅ This draft's text for ${esc(where)} is the same as the current eCFR. ${link}</div>`;
-    return;
-  }
-
-  note.textContent = `${Math.round(similarity(unit.text, draft.text) * 100)}% alike`;
-  const elided = draft.hasElision
-    ? `<div class="docx-note">⋯ The draft elides part of this subsection with <code>* * *</code>; that text is unchanged but will show as missing from the draft below.</div>`
-    : '';
-  area.innerHTML = elided + show(redline(unit.text, draft.text), draft.label)
-    + `<div class="docx-note">${link}</div>`;
+  const ref = { short: 'eCFR', name: 'the current eCFR', label: `Current eCFR (as of ${date})`, link: ecfrLink(section) };
+  renderReferenceComparison(area, note, compareWithReference(units, section, path, draft), ref,
+    `§ ${section}${pathLabel ? ' ' + pathLabel : ''}`, draft, ecfrRight);
 }
 
 // Add the eCFR choice to a card's pair picker and a one-click shortcut to it.
