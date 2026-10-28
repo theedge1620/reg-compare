@@ -1,0 +1,3 @@
+# Source regulation library (22 MB); only needed to rebuild data/icr-library.js
+# with build_icr_library.py.
+data/paragraphs.jsonl
