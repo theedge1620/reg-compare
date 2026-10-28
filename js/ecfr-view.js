@@ -62,8 +62,12 @@ function buildDiffRows(proposedChunks, ecfrMap) {
 // STEP 5 — Render diff rows into HTML
 // ─────────────────────────────────────────────────────────────────────────────
 
+// The pane offers a Word export (docx-writer.js) whenever it is a real
+// redline — side-by-side panes with nothing marked are not.
 function renderDiffRows(rows, leftLabel = 'Current eCFR text', rightLabel = 'Proposed text') {
-  let html = `
+  const marked = rows.some(r => r.type === 'diff' && /class="diff-(?:del|add)"/.test(r.oldHtml + r.newHtml));
+  let html = `<div class="diff-pane">
+    ${marked ? `<div class="rlso-bar"><button type="button" class="rlso-btn" title="Download this redline as a Word document with deletions struck through and additions underlined">Export RLSO to Word</button></div>` : ''}
     <div class="diff-pane-header">
       <div class="diff-col-label current">${esc(leftLabel)}</div>
       <div class="diff-col-label proposed">${esc(rightLabel)}</div>
@@ -77,13 +81,13 @@ function renderDiffRows(rows, leftLabel = 'Current eCFR text', rightLabel = 'Pro
         ? `⋯ ${row.count} unchanged paragraph${row.count !== 1 ? 's' : ''}`
         : '* * * * *  (unchanged text omitted)';
       html += `
-        <div class="diff-row omitted">
+        <div class="diff-row omitted" data-kind="omit">
           <div class="diff-cell current">${esc(note)}</div>
           <div class="diff-cell proposed">${esc(note)}</div>
         </div>`;
     } else if (row.type === 'header') {
       html += `
-        <div class="diff-row omitted">
+        <div class="diff-row omitted" data-kind="header">
           <div class="diff-cell current" style="font-style:normal;font-weight:600;">${esc(row.text)}</div>
           <div class="diff-cell proposed" style="font-style:normal;font-weight:600;">${esc(row.text)}</div>
         </div>`;
@@ -97,7 +101,7 @@ function renderDiffRows(rows, leftLabel = 'Current eCFR text', rightLabel = 'Pro
     }
   }
 
-  return html;
+  return html + '</div>';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,17 +179,21 @@ function renderAmendments(amendments) {
     card.className = 'amendment-card';
     card.dataset.part = amend.part || '—';
 
-    const sectionLabel = amend.sections.length
+    const sectionLabel = amend.appendix ? amend.appendix.id
+      : amend.sections.length
       ? amend.sections.map(s => `§ ${s}`).join(', ')
       : (amend.part ? `Part ${amend.part}` : '');
 
-    const ecfrLinks = amend.sections.map(s => {
-      const p = s.split('.')[0];
-      return `<a href="https://www.ecfr.gov/current/title-10/part-${p}/section-${s}" target="_blank">§ ${s} on eCFR ↗</a>`;
-    }).join(' · ');
+    const ecfrLinks = amend.appendix
+      ? `<a href="${appendixEcfrUrl(amend.appendix)}" target="_blank">${esc(amend.appendix.id)} on eCFR ↗</a>`
+      : amend.sections.map(s => {
+          const p = s.split('.')[0];
+          return `<a href="https://www.ecfr.gov/current/title-10/part-${p}/section-${s}" target="_blank">§ ${s} on eCFR ↗</a>`;
+        }).join(' · ');
 
     const hasContent = (amend.proposedChunks && amend.proposedChunks.length > 0)
-      || (amend.substitutions && amend.substitutions.length > 0);
+      || (amend.substitutions && amend.substitutions.length > 0)
+      || (amend.appendix && (amend.appendixChunks.length > 0 || amend.appendixSubs.length > 0));
 
     card.innerHTML = `
       <div class="amendment-card-header">
@@ -242,6 +250,11 @@ async function loadDiff(amend, idx) {
   const area = document.getElementById(`diff-${idx}`);
   if (!area) return;
 
+  if (amend.appendix) {
+    await loadAppendixDiff(amend, area);
+    return;
+  }
+
   // ── Path A: substitution-only amendment (instruction carries the ops) ──
   if (amend.substitutions && amend.substitutions.length) {
     await loadSubstitutionDiff(amend, area);
@@ -274,6 +287,29 @@ async function loadDiff(amend, idx) {
   }
 
   area.innerHTML = diffHtml;
+}
+
+// Redline an amendment to an appendix against the eCFR appendix, paragraph by
+// paragraph (appendixDiffRows).
+async function loadAppendixDiff(amend, area) {
+  const apx = amend.appendix;
+  let blocks = null;
+  try {
+    blocks = ecfrAppendixBlocks(await fetchEcfrAppendixXml(apx.part, apx.id));
+  } catch (e) {
+    console.warn(`eCFR fetch failed ${apx.id}:`, e.message);
+  }
+  if (!blocks) {
+    area.innerHTML = `
+      <div class="ecfr-error">⚠ Could not retrieve current eCFR text for ${esc(apx.id)}.
+      This may be a new appendix, or the eCFR API is unavailable.</div>
+      <div class="proposed-only">${esc(amend.appendixChunks.map(c => c.type === 'omit' ? '* * * * *' : c.text).join('\n\n'))}</div>`;
+    return;
+  }
+  const rows = appendixDiffRows(amend, appendixChunks(blocks));
+  area.innerHTML = rows.length
+    ? renderDiffRows(rows)
+    : `<div class="ecfr-error">⚠ Could not match the amended paragraphs of ${esc(apx.id)} in the current eCFR text.</div>`;
 }
 
 // Build the diff for a substitution-only amendment.

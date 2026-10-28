@@ -19,6 +19,9 @@
 function parseAmendments(htmlText) {
   const tmp = document.createElement('div');
   tmp.innerHTML = htmlText;
+  // regulations.gov pages hide e-mail addresses behind Cloudflare's
+  // obfuscation; restore them so they match the eCFR text.
+  for (const el of tmp.querySelectorAll('[data-cfemail]')) el.textContent = decodeCfEmail(el.dataset.cfemail);
   const pre = tmp.querySelector('pre');
   const rawText = pre ? pre.innerText : tmp.innerText;
   const lines = rawText.split('\n');
@@ -28,6 +31,7 @@ function parseAmendments(htmlText) {
   let current = null;
   let bodyLines = [];
   let inBody = false;
+  let inSubInstr = false;   // inside a wrapped "a. Revise …" sub-instruction
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -73,11 +77,11 @@ function parseAmendments(htmlText) {
     const line = lines[i].trimEnd();
     const trimmed = line.trim();
 
-    if (trimmed === '0') { i++; continue; }
+    if (trimmed === '0') { inSubInstr = false; i++; continue; }
 
     const match = trimmed.match(/^(\d+)\.\s+(.+)/);
     const isAmendStart = match &&
-      /(?:Revise|Amend|Add|Remove|Redesignate|In Sec\.|In §)/i.test(trimmed);
+      /(?:Revise|Amend|Add|Remove|Redesignate|In Sec\.|In §|In appendix)/i.test(trimmed);
 
     if (isAmendStart) {
       finalizeAmend();
@@ -127,7 +131,21 @@ function parseAmendments(htmlText) {
 
     } else if (current) {
       const secHeaderRe = /^Sec\.\s+\d+\.\d+|^§\s*\d+\.\d+/;
-      if (secHeaderRe.test(trimmed) && !inBody) inBody = true;
+      const appendixHead = APPENDIX_HEAD_RE.test(trimmed) && appendixRef(current.instruction);
+      // Lettered sub-instructions ("a. Revise Section III.A;", each after its
+      // own "0" separator, wrapping onto unindented lines) and the closing
+      // "… read as follows:" belong to the instruction, not the amendatory text.
+      if (!inBody && !bodyLines.length && trimmed && !secHeaderRe.test(trimmed) && !appendixHead) {
+        const readsAsFollows = /\bread(?:s)? as follows:?$/i.test(trimmed);
+        if (/^[a-z]\.\s+\S/.test(trimmed) || (inSubInstr && !line.startsWith('    ')) || readsAsFollows) {
+          current.instruction += ' ' + trimmed;
+          inSubInstr = !readsAsFollows;
+          i++;
+          continue;
+        }
+      }
+      inSubInstr = false;
+      if ((secHeaderRe.test(trimmed) || appendixHead) && !inBody) inBody = true;
       if (inBody || bodyLines.length > 0) bodyLines.push(line);
     }
 
@@ -149,7 +167,10 @@ function instructionSections(instruction) {
 // Complete an amendment { num, instruction } with its section references, part
 // and the proposed text that followed it. Returns null when there is nothing
 // to compare.
-function finishAmendment(amend, bodyText) {
+function finishAmendment(amend, bodyText, paraMode = false) {
+  // "In appendix D to part 52: …" — appendix paragraphs are keyed differently.
+  const apx = !instructionSections(amend.instruction).length && appendixRef(amend.instruction);
+  if (apx) return finishAppendixAmendment(amend, apx, bodyText, paraMode);
   const proposedChunks = parseProposedChunks(bodyText);
   // An instruction that names no section ("The authority citation for part 52
   // continues…") may still be followed by section text in an excerpted draft.
@@ -189,7 +210,7 @@ function parseAmendmentParagraphs(paras) {
 
   function finalizeAmend() {
     if (!current) return;
-    const amend = finishAmendment(current, bodyLines.join('\n'));
+    const amend = finishAmendment(current, bodyLines.join('\n'), true);
     if (amend) amendments.push(amend);
     current = null;
     bodyLines = [];
@@ -207,6 +228,16 @@ function parseAmendmentParagraphs(paras) {
       continue;
     }
     if (!current) continue;   // cover page, preamble
+
+    // The heading of an appendix the instruction amends opens its text, kept
+    // paragraph by paragraph for finishAppendixAmendment.
+    if (APPENDIX_HEAD_RE.test(line) && !instructionSections(current.instruction).length
+        && appendixRef(current.instruction)) {
+      inBody = true;
+      current.appendixBody = true;
+      continue;
+    }
+    if (current.appendixBody) { bodyLines.push(line); continue; }
 
     // Part and appendix headings, citations and footnotes are not proposed text.
     if (PART_HEAD_RE.test(line) || APPENDIX_HEAD_RE.test(line)) { inBody = false; continue; }
@@ -377,7 +408,7 @@ function extractOps(clause) {
   // Pattern 1: remove "X" and add "Y" (most common)
   // Handles: "remove the phrase "X" and add in its place the phrase "Y""
   //          "removing "X" and adding, in its place, "Y""
-  const removeAddRe = /remov(?:e|ing)\s+(?:the\s+)?(?:phrase\s+|cross[- ]reference\s+|definition\s+of\s+)?("([^"]+)")\s+and\s+add(?:ing)?(?:[^"]*?)?("([^"]+)")/gi;
+  const removeAddRe = /remov(?:e|ing)\s+(?:the\s+)?(?:phrase\s+|text\s+|words?\s+|cross[- ]reference\s+|definition\s+of\s+)?("([^"]+)")\s+and\s+add(?:ing)?(?:[^"]*?)?("([^"]+)")/gi;
   let m;
   while ((m = removeAddRe.exec(clause)) !== null) {
     ops.push({ remove: m[2], add: m[4] });
@@ -401,7 +432,7 @@ function extractOps(clause) {
   }
 
   // Pattern 4: remove "X" only (no replacement)
-  const removeOnlyRe = /remov(?:e|ing)\s+(?:the\s+)?(?:phrase\s+|cross[- ]reference\s+|definition\s+of\s+)?("([^"]+)")/i;
+  const removeOnlyRe = /remov(?:e|ing)\s+(?:the\s+)?(?:phrase\s+|text\s+|words?\s+|cross[- ]reference\s+|definition\s+of\s+)?("([^"]+)")/i;
   const removeOnlyM = clause.match(removeOnlyRe);
   if (removeOnlyM) {
     ops.push({ remove: removeOnlyM[2], add: '' });
@@ -439,6 +470,14 @@ function applySubstitutions(sourceText, ops, wherever) {
     }
   }
   return result;
+}
+
+// Cloudflare's data-cfemail: a hex key byte, then the address XORed with it.
+function decodeCfEmail(hex) {
+  const key = parseInt(hex.slice(0, 2), 16);
+  let out = '';
+  for (let i = 2; i < hex.length; i += 2) out += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16) ^ key);
+  return out;
 }
 
 function escapeRegex(str) {

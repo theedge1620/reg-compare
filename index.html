@@ -131,6 +131,8 @@
     via <code>/api/versioner/v1/full/{date}/title-10.xml?part={P}&amp;section={P.S}</code>
     — date from <code>/api/versioner/v1/titles.json</code> <code>up_to_date_as_of</code>.
     Only paragraphs referenced in the proposed rule are shown; <em>* * * * *</em> spans collapse unchanged text.
+    Appendices are fetched with <code>?part={P}&amp;appendix=Appendix {X} to Part {P}</code> and compared paragraph by paragraph
+    using their own designators (e.g. <code>VIII.B.6.a(1)</code>); paragraphs a revised appendix section no longer contains are shown as removed.
   </div>
   <div class="footer-note" data-view="compare">
     Subsections are matched only within the same section — <code>§ 50.55a</code> <code>(b)(2)</code> is compared
@@ -171,9 +173,11 @@
      Libraries first, then the tab views; main.js wires navigation and must be last. -->
 <script src="js/util.js"></script>
 <script src="js/docx-reader.js"></script>
+<script src="js/docx-writer.js"></script>
 <script src="js/pdf-reader.js"></script>
 <script src="js/fr-parser.js"></script>
 <script src="js/amendment-parser.js"></script>
+<script src="js/appendix.js"></script>
 <script src="js/conflicts.js"></script>
 <script src="js/diff.js"></script>
 <script src="js/ecfr-api.js"></script>

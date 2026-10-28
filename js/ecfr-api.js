@@ -102,6 +102,14 @@ async function fetchEcfrSectionXml(part, section) {
   return r.text();
 }
 
+// An appendix is fetched by its eCFR name: ?part=52&appendix=Appendix D to Part 52
+async function fetchEcfrAppendixXml(part, appendixId) {
+  const date = await getTitle10Date();
+  const r = await fetch(`https://www.ecfr.gov/api/versioner/v1/full/${date}/title-10.xml?part=${part}&appendix=${encodeURIComponent(appendixId)}`);
+  if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
+  return r.text();
+}
+
 async function fetchEcfrParagraphMap(part, section) {
   try {
     const xml = await fetchEcfrSectionXml(part, section);
