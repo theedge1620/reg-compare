@@ -1,4 +1,4 @@
-// RuleCheck — eCFR Analysis tab — diff rows, amendment cards, file handling.
+// RuleCheck — FRN vs. eCFR tab — diff rows, amendment cards, file handling.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 4 — Align proposed chunks with eCFR paragraph map, build diff rows

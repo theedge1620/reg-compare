@@ -1,4 +1,4 @@
-// RuleCheck — eCFR Analysis — Federal Register (.txt/.html) and working-draft (.docx/.pdf) amendment parsing.
+// RuleCheck — FRN vs. eCFR tab — Federal Register (.txt/.html) and working-draft (.docx/.pdf) amendment parsing.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 1 — Parse Federal Register document into amendment objects
