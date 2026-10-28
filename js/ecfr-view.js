@@ -1,65 +1,7 @@
 // RuleCheck — FRN vs. eCFR tab — diff rows, amendment cards, file handling.
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STEP 4 — Align proposed chunks with eCFR paragraph map, build diff rows
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// For each proposed chunk:
-//   'omit'   → show a collapsed "unchanged text" row spanning both columns
-//   'header' → show section heading row (no diff)
-//   'para'   → look up the matching eCFR paragraph by label, diff them
-//              If no label, compare to the full section text (simple full-replace)
-
-function buildDiffRows(proposedChunks, ecfrMap) {
-  const rows = [];
-
-  for (const chunk of proposedChunks) {
-    if (chunk.type === 'omit') {
-      rows.push({ type: 'omit' });
-      continue;
-    }
-    if (chunk.type === 'header') {
-      rows.push({ type: 'header', text: chunk.text });
-      continue;
-    }
-
-    // type === 'para'
-    const proposed = chunk.text;
-    const label = chunk.label;
-
-    // Find matching eCFR text.
-    // Priority: exact label match → prefix match → full section text
-    let ecfr = null;
-    if (ecfrMap) {
-      if (label && ecfrMap[label]) {
-        ecfr = ecfrMap[label];
-      } else if (label) {
-        // Try prefix: "(b)(2)" might match an eCFR paragraph with that prefix
-        for (const [k, v] of Object.entries(ecfrMap)) {
-          if (k !== '_full_' && (k.startsWith(label) || label.startsWith(k))) {
-            ecfr = v; break;
-          }
-        }
-      }
-      // If still no match and this is the only / first chunk, use full section
-      if (!ecfr && proposedChunks.filter(c => c.type === 'para').length === 1) {
-        ecfr = ecfrMap['_full_'] || null;
-      }
-    }
-
-    if (ecfr) {
-      const { oldHtml, newHtml } = computeDiff(ecfr, proposed);
-      rows.push({ type: 'diff', label, oldHtml, newHtml });
-    }
-    // If no eCFR match found, suppress — only show paragraphs where we have
-    // current text to compare against the proposed change.
-  }
-
-  return rows;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// STEP 5 — Render diff rows into HTML
+// Render diff rows into HTML
 // ─────────────────────────────────────────────────────────────────────────────
 
 // The pane offers a Word export (docx-writer.js) whenever it is a real
@@ -191,9 +133,8 @@ function renderAmendments(amendments) {
           return `<a href="https://www.ecfr.gov/current/title-10/part-${p}/section-${s}" target="_blank">§ ${s} on eCFR ↗</a>`;
         }).join(' · ');
 
-    const hasContent = (amend.proposedChunks && amend.proposedChunks.length > 0)
-      || (amend.substitutions && amend.substitutions.length > 0)
-      || (amend.appendix && (amend.appendixChunks.length > 0 || amend.appendixSubs.length > 0));
+    const hasContent = amend.proposedChunks.length > 0 || amend.bodyParas.length > 0
+      || hasEdits(amend.edits) || (amend.appendix && amend.appendixChunks.length > 0);
 
     card.innerHTML = `
       <div class="amendment-card-header">
@@ -249,132 +190,131 @@ async function loadDiff(amend, idx) {
   loaded.add(idx);
   const area = document.getElementById(`diff-${idx}`);
   if (!area) return;
+  if (amend.appendix) await loadAppendixDiff(amend, area);
+  else await loadSectionDiff(amend, area);
+}
 
-  if (amend.appendix) {
-    await loadAppendixDiff(amend, area);
-    return;
+function showReferenceRows(area, notes, rows, failure) {
+  const noteHtml = notes.map(n => `<div class="docx-note">${esc(n)}</div>`).join('');
+  area.innerHTML = rows.some(r => r.type !== 'omit')
+    ? noteHtml + renderDiffRows(rows)
+    : noteHtml + `<div class="ecfr-error">⚠ ${esc(failure)}</div>`;
+}
+
+// Redline an amendment to one or more sections. The reprinted text is parsed
+// like a Document Comparison draft (full paragraph paths, definitions by
+// term), each section's current text is fetched from the eCFR and parsed the
+// same way, and buildReferenceRows lines them up.
+async function loadSectionDiff(amend, area) {
+  const paras = amend.bodyParas.slice();
+  const first = paras.find(p => !ELISION_RE.test(p.trim()));
+  if (first && !SECTION_HEAD_RE.test(first) && amend.sections[0]) paras.unshift(`§ ${amend.sections[0]}`);
+  const draftUnits = paras.length ? [...parseAmendmentDoc(paras).units.values()].filter(u => u.kind === 'text') : [];
+
+  const sections = [];
+  for (const s of [...draftUnits.map(u => u.section), ...amend.sections]) if (s && !sections.includes(s)) sections.push(s);
+  const rows = [], notes = [];
+
+  for (const section of sections) {
+    const mine = draftUnits.filter(u => u.section === section);
+    const edits = editsForSection(amend.edits, section, amend.sections[0]);
+    if (!mine.length && !hasEdits(edits)) continue;
+    const draft = mine.map(u => ({ type: 'para', path: u.path, label: u.pathLabel || u.path, text: u.text, hasElision: u.hasElision }));
+    const title = ((mine[0] && mine[0].sectionTitle) || '').replace(/\[\d{1,3}\]$/, '');
+
+    let ref = null;
+    try {
+      ref = await ecfrSectionUnits(section);
+    } catch (e) {
+      if (e.status !== 404) { notes.push(`Could not retrieve § ${section} from the eCFR (${e.message}).`); continue; }
+    }
+    if (!ref) {
+      if (!draft.length) { notes.push(`§ ${section} is not in the current eCFR.`); continue; }
+      notes.push(`§ ${section} is not in the current eCFR — the rule adds it, so all of its text is new.`);
+      rows.push({ type: 'header', text: `§ ${section} ${title}`.trim() });
+      rows.push(...buildReferenceRows(draft, [], edits).rows);
+      continue;
+    }
+    regroupAmbiguousRomans(draft, ref, section);
+    const refUnits = [...ref.values()];
+    // Footnote marks on a heading ("license. 1", "license.[1]") are not part of it.
+    const refTitle = ((refUnits[0] && refUnits[0].sectionTitle) || '').replace(/\s+\d{1,2}$/, '');
+    if (title && refTitle && substantiveKey(title) !== substantiveKey(refTitle)) {
+      rows.push({ type: 'diff', label: '', ...paragraphRedline(`§ ${section} ${refTitle}`, `§ ${section} ${title}`) });
+    } else {
+      rows.push({ type: 'header', text: `§ ${section} ${refTitle || title}`.trim() });
+    }
+    const out = buildReferenceRows(draft,
+      refUnits.map(u => ({ type: 'para', path: u.path, label: u.pathLabel || u.path, text: u.text })),
+      edits, { gapOmits: true });
+    rows.push(...out.rows);
+    notes.push(...out.notes.map(n => `§ ${section}: ${n}`));
   }
+  showReferenceRows(area, notes, rows,
+    `Could not build a comparison for ${amend.sections.map(s => `§ ${s}`).join(', ') || 'this amendment'}.`);
+}
 
-  // ── Path A: substitution-only amendment (instruction carries the ops) ──
-  if (amend.substitutions && amend.substitutions.length) {
-    await loadSubstitutionDiff(amend, area);
-    return;
+// After "* * *" a lone "(i)", "(v)" or "(x)" may be a paragraph letter or a
+// roman numeral, and the elided text no longer tells which: "(a)(3) …
+// * * * (i) Except as provided …" reads as (a)(3)(i). Where the eCFR has no
+// such paragraph but has the lettered one, the draft paragraph (and those
+// under it) is moved to the letter.
+function regroupAmbiguousRomans(draft, ref, section) {
+  const has = path => ref.has(`${section}|${path}`);
+  const paths = new Set(draft.map(u => u.path));
+  for (const u of draft) {
+    const m = u.path.match(/^(\(\w+\)\(\w+\))\(([ivx])\)$/);
+    if (!m || has(u.path) || !has(`(${m[2]})`) || paths.has(`(${m[2]})`)) continue;
+    const from = u.path, to = `(${m[2]})`;
+    for (const v of draft) {
+      if (v.path === from || v.path.startsWith(from + '(')) {
+        v.path = to + v.path.slice(from.length);
+        v.label = v.path;
+      }
+    }
+    paths.add(to);
   }
+}
 
-  // ── Path B: full proposed text block ──
-  let ecfrMap = null;
-  for (const sec of amend.sections) {
-    const part = sec.split('.')[0];
-    ecfrMap = await fetchEcfrParagraphMap(part, sec);
-    if (ecfrMap) break;
-  }
-
-  const rows = buildDiffRows(amend.proposedChunks, ecfrMap);
-
-  if (!rows.length) {
-    area.innerHTML = `<div class="ecfr-error">⚠ Could not build comparison — no structured chunks found.</div>`;
-    return;
-  }
-
-  const diffHtml = renderDiffRows(rows);
-
-  if (!ecfrMap) {
-    area.innerHTML = `
-      <div class="ecfr-error">⚠ Could not retrieve current eCFR text for ${amend.sections.map(s=>`§ ${s}`).join(', ')}.
-      This may be a new section proposed for the first time, or the eCFR API is unavailable.</div>
-      <div class="proposed-only">${esc(amend.proposedChunks.map(c => c.text || (c.type==='omit'?'* * * * *':'')).join('\n\n'))}</div>`;
-    return;
-  }
-
-  area.innerHTML = diffHtml;
+// The edits an instruction makes to one section; those naming no section
+// belong to the first one it names.
+function editsForSection(edits, section, primary) {
+  const mine = e => (e.section || primary) === section;
+  return {
+    revised: edits.revised.filter(mine),
+    removals: edits.removals.filter(mine),
+    subs: edits.subs.filter(mine),
+    whole: edits.whole && mine(edits.whole) ? edits.whole : null,
+  };
 }
 
 // Redline an amendment to an appendix against the eCFR appendix, paragraph by
-// paragraph (appendixDiffRows).
+// paragraph by the appendix's own designators.
 async function loadAppendixDiff(amend, area) {
   const apx = amend.appendix;
-  let blocks = null;
+  let blocks = null, missing = false;
   try {
     blocks = ecfrAppendixBlocks(await fetchEcfrAppendixXml(apx.part, apx.id));
   } catch (e) {
-    console.warn(`eCFR fetch failed ${apx.id}:`, e.message);
+    missing = e.status === 404;
+    if (!missing) console.warn(`eCFR fetch failed ${apx.id}:`, e.message);
   }
   if (!blocks) {
+    if (missing && amend.appendixChunks.length) {
+      const out = buildReferenceRows(amend.appendixChunks, [], amend.edits, { appendix: true });
+      showReferenceRows(area, [`${apx.id} is not in the current eCFR — the rule adds it, so all of its text is new.`], out.rows, '');
+      return;
+    }
     area.innerHTML = `
       <div class="ecfr-error">⚠ Could not retrieve current eCFR text for ${esc(apx.id)}.
-      This may be a new appendix, or the eCFR API is unavailable.</div>
-      <div class="proposed-only">${esc(amend.appendixChunks.map(c => c.type === 'omit' ? '* * * * *' : c.text).join('\n\n'))}</div>`;
+      ${missing ? 'It is not in the current eCFR.' : 'The eCFR API may be unavailable.'}</div>
+      ${amend.appendixChunks.length ? `<div class="proposed-only">${esc(amend.appendixChunks.map(c => c.type === 'omit' ? '* * * * *' : c.text || '').join('\n\n'))}</div>` : ''}`;
     return;
   }
-  const rows = appendixDiffRows(amend, appendixChunks(blocks));
-  area.innerHTML = rows.length
-    ? renderDiffRows(rows)
-    : `<div class="ecfr-error">⚠ Could not match the amended paragraphs of ${esc(apx.id)} in the current eCFR text.</div>`;
-}
-
-// Build the diff for a substitution-only amendment.
-// For each substitution group (targeting a paragraph):
-//   1. Fetch the eCFR paragraph text
-//   2. Apply the ops to synthesize the proposed text
-//   3. Diff original vs. synthesized
-async function loadSubstitutionDiff(amend, area) {
-  let ecfrMap = null;
-  for (const sec of amend.sections) {
-    ecfrMap = await fetchEcfrParagraphMap(sec.split('.')[0], sec);
-    if (ecfrMap) break;
-  }
-
-  if (!ecfrMap) {
-    area.innerHTML = `
-      <div class="ecfr-error">⚠ Could not retrieve current eCFR text for ${amend.sections.map(s=>`§ ${s}`).join(', ')}.
-      Cannot apply substitution without the source text.</div>`;
-    return;
-  }
-
-  const rows = [];
-
-  for (const sub of amend.substitutions) {
-    const { ops, wherever } = sub;
-
-    // Resolve the set of paragraph labels to operate on.
-    // sub.paras may list multiple e.g. ["(a)","(b)"] for "in paragraphs (a) and (b)"
-    const targetParas = (sub.paras && sub.paras.length) ? sub.paras : [sub.para];
-
-    for (const para of targetParas) {
-      // Locate the eCFR source text for this paragraph
-      let ecfrText = null;
-
-      if (para) {
-        ecfrText = ecfrMap[para] || null;
-        if (!ecfrText) {
-          // Prefix / suffix match (e.g. stored as "(a)(1)" but targeting "(a)")
-          for (const [k, v] of Object.entries(ecfrMap)) {
-            if (k !== '_full_' && (k.startsWith(para) || para.startsWith(k))) {
-              ecfrText = v; break;
-            }
-          }
-        }
-      }
-
-      // Fall back to full section text only when no paragraph was specified
-      if (!ecfrText && !para) ecfrText = ecfrMap['_full_'] || null;
-
-      if (!ecfrText) continue; // no source text found — skip silently
-
-      const proposedText = applySubstitutions(ecfrText, ops, wherever);
-      if (proposedText === ecfrText) continue; // substitution made no change
-
-      const { oldHtml, newHtml } = computeDiff(ecfrText, proposedText);
-      rows.push({ type: 'diff', label: para || '', oldHtml, newHtml });
-    }
-  }
-
-  if (!rows.length) {
-    area.innerHTML = `<div class="ecfr-error">⚠ Could not match the substitution phrases in the current eCFR text. The phrases may differ from the version in effect when this proposed rule was published, or the paragraph could not be located.</div>`;
-    return;
-  }
-
-  area.innerHTML = renderDiffRows(rows);
+  const ref = appendixChunks(blocks).filter(c => c.type !== 'omit');
+  const out = buildReferenceRows(amend.appendixChunks, ref, amend.edits, { appendix: true });
+  showReferenceRows(area, out.notes, out.rows,
+    `Could not match the amended paragraphs of ${apx.id} in the current eCFR text.`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

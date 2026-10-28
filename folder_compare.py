@@ -115,6 +115,7 @@ SIM_TOKEN_RE = re.compile(r"[A-Za-z0-9_'-]+")
 
 ROMAN_SUCCESSOR = {"i": "ii", "v": "vi", "x": "xi"}
 ROMAN_PREDECESSOR = {"v": "iv", "x": "ix"}
+ROMAN_SEQ = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii", "xiii", "xiv", "xv", "xvi", "xvii", "xviii", "xix", "xx"]
 
 
 def js_trim(s: str) -> str:
@@ -341,7 +342,20 @@ def designator_level(token: str, stack: list[str], next_token: str | None) -> in
     resolved from the next designator: a letter's children are digits, a
     roman numeral's children are capitals."""
     if re.fullmatch(r"[0-9]+", token):
+        # The italic (1) under (A): a "(1)" straight after a capital, and the
+        # numbers that continue its run, are level 5 — "(A) … (1) … (2) … (B)".
+        if len(stack) > 3 and re.fullmatch(r"\([A-Z]+\)", stack[3] or ""):
+            if token == "1" and len(stack) == 4:
+                return 5
+            if len(stack) >= 5 and stack[4] == f"({int(token) - 1})":
+                return 5
         return 2
+    # The italic (i) under an italic (1), and the numerals continuing its run.
+    if len(stack) > 4 and re.fullmatch(r"\([0-9]+\)", stack[4] or "") and token in ROMAN_SEQ:
+        if token == "i" and len(stack) == 5:
+            return 6
+        if len(stack) >= 6 and ROMAN_SEQ.index(token) > 0 and stack[5] == f"({ROMAN_SEQ[ROMAN_SEQ.index(token) - 1]})":
+            return 6
     if re.fullmatch(r"[A-Z]+", token):
         return 4
     if re.fullmatch(r"[a-z]", token):

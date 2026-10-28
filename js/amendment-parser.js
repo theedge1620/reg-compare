@@ -127,8 +127,23 @@ const ROMAN_RE = /^[ivxlcdm]+$/;
 const ROMAN_SUCCESSOR = { i: 'ii', v: 'vi', x: 'xi' };
 const ROMAN_PREDECESSOR = { v: 'iv', x: 'ix' };
 
+const ROMAN_SEQ = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x', 'xi', 'xii', 'xiii', 'xiv', 'xv', 'xvi', 'xvii', 'xviii', 'xix', 'xx'];
+
 function designatorLevel(token, stack, nextToken) {
-  if (/^\d+$/.test(token)) return 2;                    // (1)
+  if (/^\d+$/.test(token)) {
+    // The italic (1) under (A): a "(1)" straight after a capital, and the
+    // numbers that continue its run, are level 5 — "(A) … (1) … (2) … (B)".
+    if (/^\([A-Z]+\)$/.test(stack[3] || '')) {
+      if (token === '1' && stack.length === 4) return 5;
+      if (stack.length >= 5 && stack[4] === `(${Number(token) - 1})`) return 5;
+    }
+    return 2;                                           // (1)
+  }
+  // The italic (i) under an italic (1), and the numerals continuing its run.
+  if (/^\(\d+\)$/.test(stack[4] || '') && ROMAN_SEQ.includes(token)) {
+    if (token === 'i' && stack.length === 5) return 6;
+    if (stack.length >= 6 && stack[5] === `(${ROMAN_SEQ[ROMAN_SEQ.indexOf(token) - 1]})`) return 6;
+  }
   if (/^[A-Z]+$/.test(token)) return 4;                 // (A)
   if (/^[a-z]$/.test(token)) {
     if (!'ivx'.includes(token)) return 1;               // unambiguous letter

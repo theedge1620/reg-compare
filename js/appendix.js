@@ -1,4 +1,4 @@
-// RuleCheck — CFR appendices: Roman-numeral paragraph paths and redlines against the eCFR appendix.
+// RuleCheck — CFR appendices: Roman-numeral paragraph paths and the eCFR appendix text.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Appendix structure
@@ -12,16 +12,21 @@
 //   6. a. An applicant who …                     ← digit, letter  (3, 4)
 //   (3) (i) Result in a change …                 ← (digit), (roman) (5, 6)
 //
-// so that paragraph is cited VIII.B.6.a(3)(i). Paragraphs are keyed by that
-// path, and a draft paragraph is only compared with the same path in the eCFR.
+// so that paragraph is cited VIII.B.6.a(3)(i). Other appendices use "Section
+// IV" headings, unnumbered headings ("Introduction", "General Information"),
+// or "Criterion 17—…" paragraphs, which are cited by name wherever they sit.
+// Paragraphs are keyed by that path, and a draft paragraph is only compared
+// with the same path in the eCFR.
 
 // "appendix D to part 52", "Appendix D to Part 52--Design Certification Rule…"
 const APPENDIX_REF_RE = /\bappendix\s+([A-Z]{1,2}(?:-\d+)?|\d{1,2})\s+(?:to|of)\s+(?:10\s+CFR\s+)?part\s+(\d+[A-Za-z]?)\b/i;
-// "VIII. Processes for Changes and Departures"
-const APX_HEADING_RE = /^([IVXL]+)\.\s+(\S.*)$/;
+// "VIII. Processes for Changes and Departures", "Section IV", "Section VI. Alternative …"
+const APX_ROMAN_HEAD_RE = /^(?:Section\s+)?([IVXL]+)\.?(?:\s+(.*))?$/;
+// "Criterion 17—Electric power systems. …"
+const APX_CRITERION_RE = /^Criterion\s+(\d+[A-Za-z]?)\b/;
 // "* * *" opening a paragraph's text: its existing wording is kept up to here.
 const APX_STARS_LEAD_RE = /^\*\s*\*\s*\*(?:\s*\*)*\s*/;
-const APX_STARS_LINE_RE = /^\*(?:\s*\*){2,}\s*$/;
+const APX_TITLE_PATH = '(title)';
 
 // Designator shapes in nesting order. A compound ("6. a.", "D.1.", "(3) (i)")
 // must go strictly deeper, so "A. Tier 1 …" stops after the "A.".
@@ -35,8 +40,15 @@ const APX_LEVELS = [
   [/^\(([A-Z])\)/, 8],
 ];
 
-function appendixRef(text) {
-  const m = unquoted(text).match(APPENDIX_REF_RE);
+// The appendix an instruction amends. "Add appendix T to read as follows"
+// names no part; `partHint` is the part whose heading it falls under.
+function appendixRef(text, partHint = null) {
+  const plain = unquoted(text);
+  let m = plain.match(APPENDIX_REF_RE);
+  if (!m && partHint) {
+    const bare = plain.match(/^(?:\S+\.\s+)?(?:Add|Revise|Remove|Amend|Republish|In)\s+(?:and\s+republish\s+)?(?:new\s+)?appendix\s+([A-Z]{1,2}(?:-\d+)?)\b/i);
+    if (bare) m = [bare[0], bare[1], partHint];
+  }
   if (!m) return null;
   const letter = m[1].toUpperCase();
   return { letter, part: m[2], id: `Appendix ${letter} to Part ${m[2]}` };
@@ -80,35 +92,77 @@ function pushDesignators(stack, tokens) {
   stack.length = tokens[tokens.length - 1].level + 1;
 }
 
-// The FR prints an asterisk set off by a space ("Tier 2 * information"); the
-// eCFR does not ("Tier 2* information").
+// The FR prints an asterisk set off by a space ("Tier 2 * information") and a
+// dash as "--"; the eCFR does not.
 function cleanAppendixText(s) {
-  return s.replace(/\s+/g, ' ').replace(/(\w) \*(?=[\s,.;:)]|$)/g, '$1*').trim();
+  return frSectionText(s.replace(/\s+/g, ' ')).replace(/(\w) \*(?=[\s,.;:)]|$)/g, '$1*').trim();
 }
 
-// Blocks [{ kind: 'heading' | 'para' | 'stars', text }] → chunks in order:
-//   { type: 'header', path, text }     Roman heading
+// "[3] The use of 25 rem …" — footnote text, not a paragraph of the appendix.
+const APX_FOOTNOTE_RE = /^\[\d{1,3}\]\s/;
+
+function romanValue(s) {
+  const v = { I: 1, V: 5, X: 10, L: 50 };
+  if (!/^[IVXL]+$/.test(s)) return 0;
+  let n = 0;
+  for (let i = 0; i < s.length; i++) n += v[s[i]] < (v[s[i + 1]] || 0) ? -v[s[i]] : v[s[i]];
+  return n;
+}
+
+// An unnumbered heading is keyed by its words.
+function headingKey(text) {
+  return substantiveKey(text);
+}
+
+// Blocks [{ kind: 'title' | 'heading' | 'para' | 'stars', text }] → chunks in order:
+//   { type: 'header', path, text }     heading; text null for a "II. * * *" marker
 //   { type: 'para', path, text, elidedLead }
 //   { type: 'omit' }                   "* * * * *"
 // elidedLead: the text follows "* * *" — it is added to the paragraph's
-// existing wording, which is not reprinted.
+// existing wording, which is not reprinted. A paragraph's undesignated
+// follow-on paragraphs are joined to it with "\n".
 function appendixChunks(blocks) {
   const out = [];
   let stack = [];
   let open = null;   // the last paragraph, which an undesignated one continues
+  const heading = (path, text) => {
+    stack = [];
+    stack[1] = path;
+    out.push({ type: 'header', path, text });
+    open = null;
+  };
+
   for (const b of blocks) {
     if (b.kind === 'stars') { out.push({ type: 'omit' }); open = null; continue; }
-    if (b.kind === 'heading') {
-      const m = b.text.match(APX_HEADING_RE);
-      stack = [];
-      stack[1] = m ? m[1] : b.text;
-      out.push({ type: 'header', path: stack[1], text: cleanAppendixText(b.text) });
-      open = null;
+    const text = cleanAppendixText(b.text);
+    if (APX_FOOTNOTE_RE.test(text)) continue;
+    if (b.kind === 'title' || APPENDIX_HEAD_RE.test(text)) {
+      out.push({ type: 'header', path: APX_TITLE_PATH, text });
+      stack = []; open = null;
       continue;
     }
-    let { tokens, rest } = readAppendixDesignators(b.text);
+    // "II. * * *" (a heading kept as it is) and "Section VI. …" headings. "I.",
+    // "V." or "X." after a later Roman heading is a lettered sub-heading
+    // ("I. Onsite Protective Actions …" under IV).
+    let roman = text.match(APX_ROMAN_HEAD_RE);
+    if (roman && roman[1].length === 1 && stack[1] && romanValue(stack[1]) >= romanValue(roman[1])) roman = null;
+    const romanMarker = roman && roman[2] !== undefined && APX_STARS_LEAD_RE.test(roman[2]) && !roman[2].replace(APX_STARS_LEAD_RE, '');
+    if (romanMarker) { heading(roman[1], null); continue; }
+    // An eCFR heading element is a heading whatever its punctuation ("I. Purpose.").
+    if (roman && (/^Section\s/.test(text) || b.strong || (b.kind === 'heading' && !/^[IVXL]\.\s+\S+.*[.;:]$/.test(text)))) {
+      heading(roman[1], text);
+      continue;
+    }
+    if (APX_CRITERION_RE.test(text)) {
+      stack = [];
+      stack[1] = `Criterion ${text.match(APX_CRITERION_RE)[1]}`;
+      out.push(open = { type: 'para', path: stack[1], text, elidedLead: false });
+      continue;
+    }
+
+    let { tokens, rest } = readAppendixDesignators(text);
     if (!tokens.length) {
-      const text = cleanAppendixText(b.text);
+      if (b.kind === 'heading') { heading(headingKey(text), text); continue; }
       if (open) open.text += (open.text ? '\n' : '') + text;
       else out.push(open = { type: 'para', path: appendixPath(stack), text, elidedLead: false });
       continue;
@@ -123,38 +177,12 @@ function appendixChunks(blocks) {
       else if (rest) elidedLead = true;
       else { open = null; continue; }   // "B. * * *" only marks the path
     }
-    out.push(open = { type: 'para', path: appendixPath(stack), text: cleanAppendixText(rest), elidedLead });
+    out.push(open = { type: 'para', path: appendixPath(stack), text: rest, elidedLead });
   }
   return out;
 }
 
 // ── blocks from each source ─────────────────────────────────────────────────
-
-// Federal Register plain text: a paragraph starts on an indented line and runs
-// on through the unindented lines below it; headings stand alone after a blank.
-function frAppendixBlocks(lines) {
-  const blocks = [];
-  let cur = null, afterBlank = true;
-  for (const raw of lines) {
-    const t = raw.trim();
-    if (!t || /^\[\[Page \d+\]\]$/.test(t)) { afterBlank = true; continue; }
-    if (SIGNATURE_RE.test(t)) break;
-    if (APPENDIX_HEAD_RE.test(t)) { cur = null; afterBlank = false; continue; }
-    if (APX_STARS_LINE_RE.test(t)) { blocks.push({ kind: 'stars' }); cur = null; afterBlank = false; continue; }
-    if (/^\s{2,}\S/.test(raw)) {
-      blocks.push(cur = { kind: 'para', text: t });
-    } else if (!cur || (afterBlank && APX_HEADING_RE.test(t) && t.length < 120)) {
-      const heading = APX_HEADING_RE.test(t) && t.length < 120;
-      blocks.push({ kind: heading ? 'heading' : 'para', text: t });
-      cur = heading ? null : blocks[blocks.length - 1];
-    } else {
-      // The FR wraps at hyphens and keeps them: "short-" + "term".
-      cur.text += (cur.text.endsWith('-') ? '' : ' ') + t;
-    }
-    afterBlank = false;
-  }
-  return blocks;
-}
 
 // Working drafts: one block per paragraph. A short Roman-numbered line without
 // closing punctuation is a heading ("V. Applicable Regulations").
@@ -164,19 +192,22 @@ function paragraphAppendixBlocks(paras) {
     const t = p.trim();
     if (!t) continue;
     if (SIGNATURE_RE.test(t)) break;
-    if (APPENDIX_HEAD_RE.test(t)) continue;
-    if (APX_STARS_LINE_RE.test(t)) blocks.push({ kind: 'stars' });
-    else if (APX_HEADING_RE.test(t) && t.length < 120 && !/[.;:,]$/.test(t)) blocks.push({ kind: 'heading', text: t });
+    if (APPENDIX_HEAD_RE.test(t)) blocks.push({ kind: 'title', text: t });
+    else if (ELISION_RE.test(t) || /^\*(?:\s*\*){4}\s*$/.test(t)) blocks.push({ kind: 'stars' });
+    else if (t.length < 120 && !/[.;:,]$/.test(t) && (APX_ROMAN_HEAD_RE.test(t) || !readAppendixDesignators(t).tokens.length)
+             && /^[A-Z]/.test(t) && t.split(/\s+/).length <= 12) blocks.push({ kind: 'heading', text: t });
     else blocks.push({ kind: 'para', text: t });
   }
   return blocks;
 }
 
-// eCFR appendix XML: HD1 headings and P/FP paragraphs, without footnotes.
+// eCFR appendix XML: the title, HD1–HD3 headings and P/FP paragraphs, without footnotes.
 function ecfrAppendixBlocks(xmlText) {
   const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
   if (doc.querySelector('parsererror')) return null;
   const blocks = [];
+  const head = doc.querySelector('DIV9 > HEAD, DIV5 > HEAD, HEAD');
+  if (head) blocks.push({ kind: 'title', text: head.textContent.replace(/\s+/g, ' ').trim() });
   for (const el of doc.querySelectorAll('HD1, HD2, HD3, P, FP, FP-1, FP-2')) {
     if (el.closest('FTNT, NOTE, EDNOTE, CITA, AUTH, SOURCE, GPOTABLE')) continue;
     const copy = el.cloneNode(true);
@@ -184,54 +215,108 @@ function ecfrAppendixBlocks(xmlText) {
       if (su.nextElementSibling && su.nextElementSibling.nodeName === 'FTREF') su.remove();   // footnote mark
     }
     const text = copy.textContent.replace(/\s+/g, ' ').trim();
-    if (text) blocks.push({ kind: el.nodeName === 'HD1' ? 'heading' : 'para', text });
+    if (text) blocks.push(el.nodeName.startsWith('HD') ? { kind: 'heading', text, strong: true } : { kind: 'para', text });
   }
   return blocks;
 }
 
-// ── the instruction ─────────────────────────────────────────────────────────
+// ── instruction targets ─────────────────────────────────────────────────────
+//
+// "Revise Sections V.A, VI.B.1 and 7, VII, and VIII.B.6" → V.A, VI.B.1,
+// VI.B.7, VII, VIII.B.6. A short reference continues the one before it ("7"
+// after "VI.B.1"), or the context the instruction set up ("In appendix A to
+// part 52, section VIII, … In B, … revise paragraph 3" → VIII.B.3).
 
-// Paragraphs an appendix instruction names:
-//   "Revise Sections V.A, VI.B.1 and 7, VII, and VIII.B.6"
-//     → ["V.A", "VI.B.1", "VI.B.7", "VII", "VIII.B.6"]
-// A short reference continues the one before it ("7" after "VI.B.1") when it
-// is the same kind of designator as the part it replaces.
-const APX_TARGET_TOKEN_RE = /^(?:[IVXL]+|[A-Z]|\d{1,3}|[a-z])(?:\.(?:[A-Z]|\d{1,3}|[a-z]))*(?:\((?:\d{1,3}|[ivx]{1,5}|[a-z]|[A-Z])\))*(?![\w])/;
+const APX_TARGET_TOKEN_RE = /^(?:[IVXL]+|[A-Z]|\d{1,3}|[a-z])(?:\.(?:[A-Z]|\d{1,3}|[a-z]))*(?:\((?:\d{1,3}|[ivx]{1,5}|[a-z]|[A-Z])\))*\.?(?![\w])/;
 
 function appendixPathComps(token) {
-  const [dotted, ...parens] = token.split('(');
-  return [...dotted.split('.'), ...parens.map(p => `(${p}`)];
+  const [dotted, ...parens] = token.replace(/\.$/, '').split('(');
+  return [...dotted.split('.').filter(Boolean), ...parens.map(p => `(${p}`)];
 }
 
 function joinAppendixComps(comps) {
   return comps.reduce((s, c) => (c.startsWith('(') ? s + c : s ? `${s}.${c}` : c), '');
 }
 
-function appendixTargets(clause) {
-  const kind = c => /^\(/.test(c) ? 'p' : /^\d+$/.test(c) ? 'n' : /^[a-z]$/.test(c) ? 'l' : /^[A-Z]$/.test(c) ? 'C' : 'R';
-  const text = unquoted(clause);
+function appendixCompKind(c, i) {
+  if (c.startsWith('(')) return 'p';
+  if (/^\d+$/.test(c)) return 'n';
+  if (/^[a-z]$/.test(c)) return 'l';
+  if (i === 0 && /^[IVXL]+$/.test(c)) return 'R';   // the first component is the Roman heading
+  return /^[A-Z]$/.test(c) ? 'C' : 'R';
+}
+
+// A reference read against `base` (the path it is relative to, as components).
+// A Roman numeral that is plainly a heading ("VIII", "V.A") starts afresh;
+// anything else replaces the base from its own level down ("7" after
+// "VI.B.1" → VI.B.7), or hangs below it ("3.a" under VIII.B → VIII.B.3.a).
+function resolveAppendixRef(comps, base) {
+  if (/^[IVXL]+$/.test(comps[0]) && (comps[0].length > 1 || comps.length > 1 || !base.length)) return comps;
+  if (!base.length) return null;
+  const kind = appendixCompKind(comps[0], 1);
+  for (let p = base.length - 1; p >= 1; p--) {
+    if (appendixCompKind(base[p], p) === kind) return base.slice(0, p).concat(comps);
+  }
+  return base.concat(comps);
+}
+
+function bumpComp(c) {
+  if (/^\d+$/.test(c)) return String(Number(c) + 1);
+  if (/^[a-zA-Z]$/.test(c)) return String.fromCharCode(c.charCodeAt(0) + 1);
+  return null;
+}
+
+// Targets in one stretch of instruction text, read against `base`:
+// [{ path, intro }] — intro: only the paragraph's introductory text.
+function appendixTargets(text, base = []) {
+  text = unquoted(text);
   const out = [];
-  const kw = /\b(?:Sections?|paragraphs?)\s+/gi;
+  const push = (comps, intro) => {
+    const path = joinAppendixComps(comps);
+    if (!out.some(t => t.path === path)) out.push({ path, intro });
+  };
+  const kw = /\b(?:Sections?|paragraphs?|criteri(?:on|a))\s+/gi;
   let m;
   while ((m = kw.exec(text)) !== null) {
+    const criteria = /^criteri/i.test(m[0]);
+    const section = /^sections?/i.test(m[0]);
     let pos = m.index + m[0].length;
     let prev = null;
     for (;;) {
-      const t = APX_TARGET_TOKEN_RE.exec(text.slice(pos));
+      const rest = text.slice(pos);
+      const t = criteria ? /^\d+[A-Za-z]?(?![\w])/.exec(rest) : APX_TARGET_TOKEN_RE.exec(rest);
       if (!t) break;
-      const comps = appendixPathComps(t[0]);
-      let path = null;
-      if (prev && comps.length < prev.length && kind(comps[0]) === kind(prev[prev.length - comps.length])) {
-        path = prev.slice(0, prev.length - comps.length).concat(comps);
-      } else if (/^[IVXL]+$/.test(comps[0])) {
-        path = comps;
-      }
-      if (!path) break;
-      const joined = joinAppendixComps(path);
-      if (!out.includes(joined)) out.push(joined);
-      prev = path;
+      const comps = criteria ? [`Criterion ${t[0]}`] : appendixPathComps(t[0]);
+      // "section I" names a Roman heading outright.
+      const resolved = criteria || (section && /^[IVXL]+$/.test(comps[0])) ? comps : resolveAppendixRef(comps, prev || base);
+      if (!resolved) break;
       pos += t[0].length;
-      const sep = /^(?:\s*,\s*(?:and\s+|or\s+)?|\s+(?:and|or)\s+)/.exec(text.slice(pos));
+      const intro = /^\s*(?:introductory text|(?:first|second|last) sentence of the introductory text)/i.test(text.slice(pos));
+      // "IV.5. through 7." — a range of siblings
+      const range = /^\s*through\s+/i.exec(text.slice(pos));
+      if (range && prev !== resolved) {
+        const endTok = APX_TARGET_TOKEN_RE.exec(text.slice(pos + range[0].length));
+        const end = endTok && resolveAppendixRef(appendixPathComps(endTok[0]), resolved);
+        if (end && end.length === resolved.length) {
+          let cur = resolved.slice();
+          for (let guard = 0; guard < 60; guard++) {
+            push(cur, false);
+            if (cur[cur.length - 1] === end[end.length - 1]) break;
+            const next = bumpComp(cur[cur.length - 1]);
+            if (!next) break;
+            cur = cur.slice(0, -1).concat(next);
+          }
+          pos += range[0].length + endTok[0].length;
+          prev = end;
+        } else {
+          push(resolved, intro);
+          prev = resolved;
+        }
+      } else {
+        push(resolved, intro);
+        prev = resolved;
+      }
+      const sep = /^(?:\s*introductory text)?(?:\s*(?:second|first|last) sentence of the introductory text)?(?:\s*,\s*(?:and\s+|or\s+)?|\s+(?:and|or)\s+)(?:(?:paragraphs?|Sections?)\s+)?/i.exec(text.slice(pos));
       if (!sep) break;
       pos += sep[0].length;
     }
@@ -240,135 +325,27 @@ function appendixTargets(clause) {
   return out;
 }
 
-// What the instruction does besides reprinting text:
-//   revised  paths it revises — eCFR paragraphs under them that the reprinted
-//            text leaves out are removed
-//   subs     in-place edits: [{ paths, ops, wherever }]
-function appendixInstructionEdits(instruction) {
-  const body = instruction.replace(/^\s*\S+\.\s+/, '');
-  const { clauses } = splitInstructionClauses(body);
-  const revised = [], subs = [];
-  for (const cl of clauses.length ? clauses : [body]) {
-    if (clauses.length ? /^(?:Revise|Republish)\b/i.test(cl) : /\b(?:revis|republish)/i.test(cl)) {
-      for (const p of appendixTargets(cl)) if (!revised.includes(p)) revised.push(p);
-    }
-    if (/^(?:Revise|Add|Republish)\b/i.test(cl)) continue;
-    const ops = extractOps(normalizeQuotes(cl));
-    const paths = appendixTargets(cl);
-    if (ops.length && paths.length) subs.push({ paths, ops, wherever: /wherever it appears/i.test(cl) });
-  }
-  return { revised, subs };
+// The path an instruction's wording places later references under:
+// "section VIII, ``Processes …''" in the lead, "In B, …" or "In Section IV,"
+// opening a clause.
+function appendixContext(text, base = []) {
+  const plain = unquoted(text);
+  const sec = plain.match(/\b(?:in\s+)?section\s+([IVXL]+)\b(?!\.[A-Z0-9])/i);
+  let ctx = base;
+  if (sec && !/\b(?:revise|remove|add|reserve)\s+(?:and\s+\w+\s+)?section\s+[IVXL]+/i.test(plain)) ctx = [sec[1]];
+  const sub = plain.match(/^\s*In\s+([A-Z]|\d{1,3})\b(?![.(])/);   // "In B, …", "In B ``Tier 2 …''"
+  if (sub) ctx = resolveAppendixRef([sub[1]], ctx) || ctx;
+  return ctx;
 }
 
 // Complete an amendment to an appendix (see finishAmendment).
 function finishAppendixAmendment(amend, apx, bodyText, paraMode) {
   const lines = bodyText.split('\n');
-  const { revised, subs } = appendixInstructionEdits(amend.instruction);
   return {
     ...amend, sections: [], part: apx.part, appendix: apx,
-    appendixChunks: appendixChunks(paraMode ? paragraphAppendixBlocks(lines) : frAppendixBlocks(lines)),
-    appendixRevised: revised, appendixSubs: subs,
-    proposedChunks: [], substitutions: [],
+    appendixChunks: appendixChunks(paraMode ? paragraphAppendixBlocks(lines) : frBlocks(lines).map(b =>
+      b.kind === 'heading' && APPENDIX_HEAD_RE.test(b.text) ? { ...b, kind: 'title' } : b)),
+    edits: instructionEdits(amend.instruction, 'appendix', ''),
+    proposedChunks: [], bodyParas: [],
   };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Redline rows: proposed appendix text against the eCFR appendix
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Rows follow the proposed text. In-place edits and paragraphs a revision
-// drops are slotted in by their position in the eCFR, so the redline reads in
-// the appendix's own order.
-
-// A paragraph rewritten outright reads better struck whole and replaced than
-// as a word diff that threads the few shared words ("Tier", "the") through it.
-const APX_REWRITE_KEEP = 0.4;   // below this share of old text kept, strike the whole
-
-function appendixParagraphDiff(oldText, newText) {
-  const d = computeDiff(oldText, newText);
-  const kept = d.oldHtml.replace(/<span class="diff-del">[\s\S]*?<\/span>/g, '').replace(/<[^>]+>/g, '');
-  if (kept.trim().length >= APX_REWRITE_KEEP * Math.max(oldText.length, newText.length)) return d;
-  return {
-    oldHtml: `<span class="diff-del">${esc(oldText)}</span>`,
-    newHtml: `<span class="diff-add">${esc(newText)}</span>`,
-  };
-}
-
-function appendixDiffRows(amend, ecfrChunks) {
-  const ref = new Map();   // path (headings "#path") → { path, text, idx }
-  ecfrChunks.forEach((c, idx) => {
-    if (c.type === 'omit') return;
-    const key = (c.type === 'header' ? '#' : '') + c.path;
-    const prev = ref.get(key);
-    if (prev) prev.text += '\n' + c.text;
-    else ref.set(key, { path: c.path, text: c.text, idx });
-  });
-
-  // Match each proposed chunk. The FR sometimes drops a lone first designator
-  // ("A." where the eCFR has "A.1."); text under a path the eCFR leaves empty
-  // then matches its unclaimed first child.
-  const proposedPaths = new Set(amend.appendixChunks.filter(c => c.type === 'para').map(c => c.path));
-  const matched = new Set();
-  const resolved = amend.appendixChunks.map(c => {
-    if (c.type === 'omit') return { c };
-    if (c.type === 'header') return { c, r: ref.get('#' + c.path) };
-    let r = ref.get(c.path);
-    if (!r && c.text) {
-      for (const child of [`${c.path}.1`, `${c.path}(1)`]) {
-        if (ref.has(child) && !proposedPaths.has(child) && !matched.has(child)) { r = { ...ref.get(child), implied: true }; break; }
-      }
-    }
-    if (r) matched.add(r.path);
-    return { c, r };
-  });
-
-  const inScope = path => amend.appendixRevised.some(R => path === R || path.startsWith(R + '.') || path.startsWith(R + '('));
-  const pending = [];   // { idx, row, kind: 'del' | 'sub' }
-  for (const [key, r] of ref) {
-    if (key.startsWith('#') || matched.has(r.path) || !inScope(r.path)) continue;
-    pending.push({ idx: r.idx, kind: 'del',
-      row: { type: 'diff', label: r.path, oldHtml: `<span class="diff-del">${esc(r.text)}</span>`, newHtml: '' } });
-  }
-  for (const sub of amend.appendixSubs) {
-    for (const path of sub.paths) {
-      const r = ref.get(path);
-      if (!r || matched.has(path)) continue;
-      const amended = applySubstitutions(r.text, sub.ops, sub.wherever);
-      if (amended === r.text) continue;
-      const { oldHtml, newHtml } = computeDiff(r.text, amended);
-      pending.push({ idx: r.idx, kind: 'sub', row: { type: 'diff', label: path, oldHtml, newHtml } });
-    }
-  }
-  pending.sort((a, b) => a.idx - b.idx);
-
-  const rows = [];
-  const take = k => { const out = []; while (pending.length && pending[0].idx < k) out.push(pending.shift()); return out; };
-  const nextIdx = i => { for (let j = i + 1; j < resolved.length; j++) if (resolved[j].r) return resolved[j].r.idx; return Infinity; };
-
-  resolved.forEach(({ c, r }, i) => {
-    if (c.type === 'omit') {
-      // Dropped paragraphs belong to the text above the stars; in-place edits
-      // further on sit in the unchanged stretch the stars stand for.
-      const due = take(nextIdx(i));
-      rows.push(...due.filter(p => p.kind === 'del').map(p => p.row), { type: 'omit' });
-      const subs = due.filter(p => p.kind === 'sub');
-      if (subs.length) rows.push(...subs.map(p => p.row), { type: 'omit' });
-      return;
-    }
-    if (r) rows.push(...take(r.idx).map(p => p.row));
-    if (c.type === 'header') {
-      if (!r || substantiveKey(r.text) === substantiveKey(c.text)) rows.push({ type: 'header', text: c.text });
-      else rows.push({ type: 'diff', label: '', ...computeDiff(r.text, c.text) });
-      return;
-    }
-    const label = r && r.implied ? `${r.path} (unnumbered in the draft)` : c.path;
-    if (!r) {
-      rows.push({ type: 'diff', label, oldHtml: '',
-        newHtml: `<span class="diff-add">${esc((c.elidedLead ? '* * * ' : '') + c.text)}</span>` });
-      return;
-    }
-    rows.push({ type: 'diff', label, ...appendixParagraphDiff(r.text, c.elidedLead ? `${r.text} ${c.text}` : c.text) });
-  });
-  rows.push(...take(Infinity).map(p => p.row));
-  return rows;
 }

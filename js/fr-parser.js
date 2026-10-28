@@ -5,16 +5,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Each amendment object:
-//   { num, instruction, sections[], part, proposedChunks[], substitutions[] }
+//   { num, instruction, sections[], part, proposedChunks[], bodyParas[], edits }
+// or, for an appendix (appendix.js):
+//   { num, instruction, part, appendix: { letter, part, id }, appendixChunks[], edits }
 //
-// proposedChunks — ordered array used when the FR supplies full replacement text:
+// bodyParas — the amendatory text one paragraph per entry, which ecfr-view.js
+//   parses with parseAmendmentDoc to compare with the eCFR section.
+// proposedChunks — the same text in coarse chunks, shown when the eCFR can't be reached:
 //   { type: 'omit' }                  — "* * * * *" unchanged-text marker
 //   { type: 'para', label, text }     — paragraph with its designator
 //   { type: 'header', text }          — section/subpart heading line
-//
-// substitutions — used when the instruction *is* the amendment (no body text):
-//   { para, ops: [{ remove, add }] }
-//   e.g. para="(e)", ops=[{ remove:"part 52", add:"part 52 or part 53" }]
+// edits — what the instruction does beyond reprinting text (frn-redline.js):
+//   paragraphs it revises or removes, in-place "remove … and add …" edits.
 
 function parseAmendments(htmlText) {
   const tmp = document.createElement('div');
@@ -32,6 +34,7 @@ function parseAmendments(htmlText) {
   let bodyLines = [];
   let inBody = false;
   let inSubInstr = false;   // inside a wrapped "a. Revise …" sub-instruction
+  let partHint = null;      // the part whose "PART 50--…" heading was last seen
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -43,7 +46,9 @@ function parseAmendments(htmlText) {
     if (!trimmed) return false;                           // blank — see lookahead below
     if (trimmed === '0') return false;                    // FR paragraph separator
     if (/^PART \d+/i.test(trimmed)) return false;         // part header
-    if (/^Sec\.\s+\d+\.\d+/.test(trimmed)) return false;  // section heading
+    // A section heading has a title ("Sec. 50.220  Use of …"); a wrapped
+    // instruction may also start a line with "Sec. 50.221 to read as follows:".
+    if (/^Sec\.\s+\d+\.\d+[\w.]*\s+(?:[A-Z[]|$)/.test(trimmed)) return false;
     if (/^Sec\.\s+\d+\.\d+.*\[Amended\]/i.test(trimmed)) return false;
     if (ls.startsWith('    ')) return false;              // 4-space body indent
     if (/^\[\[Page \d+\]\]/.test(trimmed)) return false;  // page marker itself — skip via lookahead
@@ -71,17 +76,24 @@ function parseAmendments(htmlText) {
   }
 
   // ── main pass ─────────────────────────────────────────────────────────────
+  //
+  // Amendments follow the words of issuance ("For the reasons set out in the
+  // preamble …"); numbered paragraphs in the preamble are not instructions.
 
-  let i = 0;
+  const issuance = lines.findIndex(l => ISSUANCE_RE.test(l.trim()));
+  let i = issuance === -1 ? 0 : issuance + 1;
   while (i < lines.length) {
     const line = lines[i].trimEnd();
     const trimmed = line.trim();
 
     if (trimmed === '0') { inSubInstr = false; i++; continue; }
+    if (/^Dated:/.test(trimmed) || /^\[FR Doc\./.test(trimmed)) break;   // signature block
+    const partHead = !/^\s/.test(line) && trimmed.match(/^PART\s+(\d+[A-Za-z]?)\b/);
+    if (partHead) partHint = partHead[1];
 
-    const match = trimmed.match(/^(\d+)\.\s+(.+)/);
-    const isAmendStart = match &&
-      /(?:Revise|Amend|Add|Remove|Redesignate|In Sec\.|In §|In appendix)/i.test(trimmed);
+    // Instructions start at the margin; body paragraphs are indented.
+    const match = !/^\s/.test(line) && trimmed.match(/^(\d+)\.\s+(.+)/);
+    const isAmendStart = match && FR_INSTRUCTION_LEAD_RE.test(match[2]);
 
     if (isAmendStart) {
       finalizeAmend();
@@ -108,9 +120,11 @@ function parseAmendments(htmlText) {
           const resume = skipPageBreak(j);
           if (resume < lines.length) {
             const resumeLine = lines[resume];
-            // Resume only if the next substantive line is still an instruction
-            // continuation (not a section heading, not a body indent, not '0')
-            if (isInstructionContinuation(resumeLine) &&
+            // Resume only mid-sentence, and only if the next substantive line is
+            // still an instruction continuation (not a heading, body indent or '0')
+            if (!/[.:;]$/.test(instrLines[instrLines.length - 1]) &&
+                isInstructionContinuation(resumeLine) &&
+                !APPENDIX_HEAD_RE.test(resumeLine.trim()) && !ELISION_RE.test(resumeLine.trim()) &&
                 !resumeLine.trim().startsWith('a.') &&
                 !resumeLine.trim().startsWith('b.')) {
               instrLines.push(resumeLine.trim());
@@ -124,17 +138,18 @@ function parseAmendments(htmlText) {
       // Join with a single space (the FR wraps at ~72 chars with no hyphenation)
       const fullInstruction = instrLines.join(' ').replace(/\s+/g, ' ').trim();
 
-      current = { num: match[1], instruction: fullInstruction };
+      current = { num: match[1], instruction: fullInstruction, partHint, prev: amendments[amendments.length - 1] };
       inBody = false;
       i = j; // resume after the instruction lines
       continue;
 
     } else if (current) {
       const secHeaderRe = /^Sec\.\s+\d+\.\d+|^§\s*\d+\.\d+/;
-      const appendixHead = APPENDIX_HEAD_RE.test(trimmed) && appendixRef(current.instruction);
+      const appendixHead = APPENDIX_HEAD_RE.test(trimmed) && appendixRef(current.instruction, current.partHint);
       // Lettered sub-instructions ("a. Revise Section III.A;", each after its
       // own "0" separator, wrapping onto unindented lines) and the closing
       // "… read as follows:" belong to the instruction, not the amendatory text.
+      if (!inBody && !bodyLines.length && /^\[\[Page \d+\]\]$/.test(trimmed)) { i++; continue; }
       if (!inBody && !bodyLines.length && trimmed && !secHeaderRe.test(trimmed) && !appendixHead) {
         const readsAsFollows = /\bread(?:s)? as follows:?$/i.test(trimmed);
         if (/^[a-z]\.\s+\S/.test(trimmed) || (inSubInstr && !line.startsWith('    ')) || readsAsFollows) {
@@ -155,13 +170,28 @@ function parseAmendments(htmlText) {
   return amendments;
 }
 
+// How an FR instruction opens, after its number: "In Sec. 50.2, …", "In 51.4,
+// …", "In appendix D to part 52:", "Revise …", "Sec. 50.120:", "The authority
+// citation …" (which ends the instruction before it). "The DG-1434,
+// ``Addressing …''" in a numbered preamble list is not one.
+const FR_INSTRUCTION_LEAD_RE = /^(?:In\s+(?:Sec\.|§|\d+\.\d+|appendix\b|part\b|subpart\b)|(?:Revise|Amend|Add|Remove|Redesignate|Republish|Reserve|Designate|Transfer|Suspend|Correct)\b|(?:Sec\.|§)\s*\d|The authority citation\b)/i;
+
 // Section references in an instruction: "Sec. 2.1", "§ 50.55a"
 const AMEND_SECTION_REF_RE = /(?:Sec\.|§)\s*(\d+\.\d+[\w.]*)/g;
 // "Sec. 55.41  Written examination: Operators." / "§ 52.21 Administrative …"
 const TITLED_SECTION_HEAD_RE = /^(?:Sec\.|§)\s*(\d+\.\d+[\w.]*)\s+[A-Z]/;
 
+// Sections an instruction amends. Quoted text is wording being removed or
+// added ("remove the reference ``Sec. 50.46b''"), not a section it amends.
 function instructionSections(instruction) {
-  return [...instruction.matchAll(AMEND_SECTION_REF_RE)].map(m => m[1].replace(/\.+$/, ''));
+  const out = [];
+  const bare = instruction.match(/^\s*(?:\S+\.\s+)?In\s+(\d+\.\d+[A-Za-z]*)\b/);   // "In 53.040:"
+  if (bare) out.push(bare[1]);
+  for (const m of unquoted(instruction).matchAll(AMEND_SECTION_REF_RE)) {
+    const s = m[1].replace(/\.+$/, '');
+    if (!out.includes(s)) out.push(s);
+  }
+  return out;
 }
 
 // Complete an amendment { num, instruction } with its section references, part
@@ -169,7 +199,9 @@ function instructionSections(instruction) {
 // to compare.
 function finishAmendment(amend, bodyText, paraMode = false) {
   // "In appendix D to part 52: …" — appendix paragraphs are keyed differently.
-  const apx = !instructionSections(amend.instruction).length && appendixRef(amend.instruction);
+  const { partHint, prev, ...rest } = amend;
+  amend = rest;
+  const apx = !instructionSections(amend.instruction).length && appendixRef(amend.instruction, partHint);
   if (apx) return finishAppendixAmendment(amend, apx, bodyText, paraMode);
   const proposedChunks = parseProposedChunks(bodyText);
   // An instruction that names no section ("The authority citation for part 52
@@ -182,11 +214,71 @@ function finishAmendment(amend, bodyText, paraMode = false) {
       .map(c => c.type === 'header' && c.text.match(TITLED_SECTION_HEAD_RE))
       .filter(Boolean).map(m => m[1].replace(/\.+$/, ''));
   }
+  // "Remove and reserve paragraph (c)(2)." on its own continues the section
+  // the instruction before it amended.
+  if (!sections.length && prev && prev.sections && prev.sections.length
+      && /^\S+\.\s+(?:Remove|Revise|Add|Redesignate)\b[^§]*\bparagraphs?\s*\(/i.test(amend.instruction)) {
+    sections = prev.sections.slice(0, 1);
+  }
   const partMatch = amend.instruction.match(/part\s+(\d+)/i);
   const part = sections.length ? sections[0].split('.')[0] : (partMatch ? partMatch[1] : null);
-  const substitutions = proposedChunks.length ? [] : parseSubstitutionInstruction(amend.instruction);
-  if (!proposedChunks.length && !substitutions.length && !sections.length) return null;
-  return { ...amend, sections, part, proposedChunks, substitutions };
+  if (!sections.length) return null;   // an authority citation, or nothing to compare
+  // The amendatory text paragraph by paragraph, for parseAmendmentDoc.
+  const bodyParas = paraMode ? bodyText.split('\n').filter(l => l.trim())
+    : frBlocks(bodyText.split('\n')).map(b => b.kind === 'stars' ? '* * * * *' : frSectionText(b.text));
+  const edits = instructionEdits(amend.instruction, 'section', sections[0] || '');
+  return { ...amend, sections, part, proposedChunks, bodyParas, edits };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Federal Register plain text → paragraphs
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The FR wraps text at about 72 characters. A paragraph starts on an indented
+// line and runs on through the unindented lines below it, across page breaks;
+// headings ("Sec. 50.10 …", "III. Scope and Contents", "Appendix D to …")
+// stand at the margin after a blank line and may wrap onto a second line.
+
+const FR_PAGE_RE = /^\[\[Page \d+\]\]$/;
+const FR_SKIP_RE = /^(?:BILLING CODE\b|\[GRAPHIC\]|\[TIFF OMITTED\])/;
+
+// Blocks [{ kind: 'heading' | 'para' | 'stars', text }]
+function frBlocks(lines) {
+  const blocks = [];
+  let cur = null, afterBlank = true;
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (!t || FR_PAGE_RE.test(t) || FR_SKIP_RE.test(t)) { afterBlank = true; continue; }
+    if (/^Dated:/.test(t) || /^\[FR Doc\./.test(t)) break;
+    if (!/^\s/.test(raw) && PART_HEAD_RE.test(t)) break;   // the next part's amendments
+    if (ELISION_RE.test(t) || /^\*(?:\s*\*){4}\s*$/.test(t)) {
+      blocks.push({ kind: 'stars' });
+      cur = null; afterBlank = false;
+      continue;
+    }
+    if (/^\s{2,}\S/.test(raw)) {
+      blocks.push(cur = { kind: 'para', text: t });
+    } else if (cur && (!afterBlank || (cur.kind === 'para' && !/[.:;]$/.test(cur.text)))) {
+      // Wrapped line, or a paragraph resuming after a page break. The FR keeps
+      // a hyphen at a line break ("short-" + "term").
+      cur.text += (cur.text.endsWith('-') ? '' : ' ') + t;
+    } else {
+      blocks.push(cur = { kind: 'heading', text: t });
+    }
+    afterBlank = false;
+  }
+  return blocks;
+}
+
+// FR conventions → the eCFR's: "Sec." for "§", "\[1]\" footnote marks, "--" dashes.
+function frSectionText(text) {
+  return text
+    .replace(/\bSecs?\.\s+Secs?\.\s+(?=\d)/g, '§§ ')
+    .replace(/\bSecs\.\s+(?=\d)/g, '§§ ')
+    .replace(/\bSec\.\s+(?=\d)/g, '§ ')
+    .replace(/^\\\[?(\d{1,3})\]?\\\s*/, '[$1] ')   // footnote text: "\[5]\Alphanumeric …"
+    .replace(/\\\[?(\d{1,3})\]?\\/g, '[$1]')
+    .replace(/--/g, '—');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -207,6 +299,7 @@ function parseAmendmentParagraphs(paras) {
   let current = null;
   let bodyLines = [];
   let inBody = false;
+  let partHint = null;
 
   function finalizeAmend() {
     if (!current) return;
@@ -221,10 +314,13 @@ function parseAmendmentParagraphs(paras) {
     const line = paras[i].trim();
     if (!line) continue;
 
+    const partHead = line.match(/^PART\s+(\d+[A-Za-z]?)\b/);
+    if (partHead) partHint = partHead[1];
+
     const instr = readInstruction(line);
     if (instr) {
       finalizeAmend();
-      current = { num: instr.num, instruction: line };
+      current = { num: instr.num, instruction: line, partHint, prev: amendments[amendments.length - 1] };
       continue;
     }
     if (!current) continue;   // cover page, preamble
@@ -232,7 +328,7 @@ function parseAmendmentParagraphs(paras) {
     // The heading of an appendix the instruction amends opens its text, kept
     // paragraph by paragraph for finishAppendixAmendment.
     if (APPENDIX_HEAD_RE.test(line) && !instructionSections(current.instruction).length
-        && appendixRef(current.instruction)) {
+        && appendixRef(current.instruction, current.partHint)) {
       inBody = true;
       current.appendixBody = true;
       continue;
@@ -405,10 +501,22 @@ function extractParaTarget(clause) {
 function extractOps(clause) {
   const ops = [];
 
+  // Pattern 0: a whole sentence — "remove the last sentence", "the last
+  // sentence is removed", "remove the first sentence of paragraph (a) and add
+  // in its place "Y"" → { sentence: 'first' | 'last', add }
+  const sentenceM = clause.match(/remov(?:e|ing)\s+the\s+(first|last)\s+sentence\b(?:[^"]*?\band\s+add(?:ing)?[^"]*?"([^"]+)")?/i)
+    || clause.match(/\bthe\s+(first|last)\s+sentence\s+(?:is|are)\s+removed\b/i);
+  if (sentenceM) {
+    ops.push({ sentence: sentenceM[1].toLowerCase(), remove: null, add: sentenceM[2] || '' });
+    return ops;
+  }
+
   // Pattern 1: remove "X" and add "Y" (most common)
   // Handles: "remove the phrase "X" and add in its place the phrase "Y""
   //          "removing "X" and adding, in its place, "Y""
-  const removeAddRe = /remov(?:e|ing)\s+(?:the\s+)?(?:phrase\s+|text\s+|words?\s+|cross[- ]reference\s+|definition\s+of\s+)?("([^"]+)")\s+and\s+add(?:ing)?(?:[^"]*?)?("([^"]+)")/gi;
+  //          "remove from paragraph (c) the text "X" and add, in its place, "Y""
+  //          "remove the phrase "X" and replace it with "Y""
+  const removeAddRe = /remov(?:e|ing)\s+(?:(?!reserv|and\b)[^"]){0,60}?("([^"]+)")\s+and\s+(?:add(?:ing)?|replac(?:e|ing))(?:[^"]*?)?("([^"]+)")/gi;
   let m;
   while ((m = removeAddRe.exec(clause)) !== null) {
     ops.push({ remove: m[2], add: m[4] });
@@ -432,7 +540,7 @@ function extractOps(clause) {
   }
 
   // Pattern 4: remove "X" only (no replacement)
-  const removeOnlyRe = /remov(?:e|ing)\s+(?:the\s+)?(?:phrase\s+|text\s+|words?\s+|cross[- ]reference\s+|definition\s+of\s+)?("([^"]+)")/i;
+  const removeOnlyRe = /remov(?:e|ing)\s+(?:(?!reserv|and\b|definition)[^"]){0,60}?("([^"]+)")/i;
   const removeOnlyM = clause.match(removeOnlyRe);
   if (removeOnlyM) {
     ops.push({ remove: removeOnlyM[2], add: '' });
@@ -455,6 +563,14 @@ function extractOps(clause) {
 function applySubstitutions(sourceText, ops, wherever) {
   let result = sourceText;
   for (const op of ops) {
+    if (op.sentence) {
+      const sentences = splitSentences(result);
+      if (sentences.length < 2 && !op.add) continue;   // never remove a paragraph's only sentence
+      const k = op.sentence === 'first' ? 0 : sentences.length - 1;
+      sentences[k] = op.add;
+      result = sentences.filter(Boolean).join(' ');
+      continue;
+    }
     if (op.remove) {
       const flags = wherever ? 'gi' : 'i';
       const re = new RegExp(escapeRegex(op.remove), flags);
@@ -478,6 +594,23 @@ function decodeCfEmail(hex) {
   let out = '';
   for (let i = 2; i < hex.length; i += 2) out += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16) ^ key);
   return out;
+}
+
+// Sentences of a paragraph. A period after a designator, an abbreviation
+// ("U.S.", "No.", "Sec.") or a section number does not end one.
+function splitSentences(text) {
+  const out = [];
+  let start = 0;
+  const re = /[.?!][”"']?\s+(?=[A-Z(“"])/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const before = text.slice(start, m.index + 1);
+    if (/(?:\b[A-Z]|\bU\.S|\bNo|\bNos|\bSec|\bSecs|\bpar|\be\.g|\bi\.e|\bet al|\bv|\bvs|\bInc|\bCo|\bDr|\bMr|\bMs|\b\d+)\.$/.test(before)) continue;
+    out.push(text.slice(start, m.index + m[0].length).trim());
+    start = m.index + m[0].length;
+  }
+  out.push(text.slice(start).trim());
+  return out.filter(Boolean);
 }
 
 function escapeRegex(str) {
